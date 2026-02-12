@@ -1,8 +1,8 @@
-defmodule Logflare.SystemMetrics.Schedulers.PollerTest do
+defmodule Logflare.SystemMetrics.Schedulers.MeasurementsTest do
   use Logflare.DataCase, async: false
-  alias Logflare.SystemMetrics.Schedulers.Poller
+  alias Logflare.SystemMetrics.Schedulers.Measurements
 
-  test "poller emits scheduler utilization telemetry events" do
+  test "dispatch_utilization emits scheduler utilization telemetry events" do
     telemetry_ref =
       :telemetry_test.attach_event_handlers(self(), [
         [:logflare, :system, :scheduler, :utilization]
@@ -10,10 +10,11 @@ defmodule Logflare.SystemMetrics.Schedulers.PollerTest do
 
     on_exit(fn -> :telemetry.detach(telemetry_ref) end)
 
-    # Manually invoke handle_info to test the telemetry emission
-    # We need a valid scheduler sample as state
-    state = :scheduler.sample()
-    Poller.handle_info(:poll_metrics, state)
+    # First call initializes the persistent_term
+    Measurements.dispatch_utilization()
+
+    # Second call should emit events
+    Measurements.dispatch_utilization()
 
     # Should receive at least one event (for each scheduler)
     assert_received {[:logflare, :system, :scheduler, :utilization], ^telemetry_ref, measurements,
@@ -37,21 +38,24 @@ defmodule Logflare.SystemMetrics.Schedulers.PollerTest do
     assert metadata.type in ["normal", "dirty", "total"]
   end
 
-  test "poller emits events for multiple schedulers", %{test: _test} do
-    ref =
+  test "dispatch_utilization emits events for multiple schedulers" do
+    telemetry_ref =
       :telemetry_test.attach_event_handlers(self(), [
         [:logflare, :system, :scheduler, :utilization]
       ])
 
     on_exit(fn ->
-      :telemetry.detach(ref)
+      :telemetry.detach(telemetry_ref)
     end)
 
-    state = :scheduler.sample()
-    Poller.handle_info(:poll_metrics, state)
+    # First call initializes
+    Measurements.dispatch_utilization()
+
+    # Second call emits events
+    Measurements.dispatch_utilization()
 
     # Collect all events (should be multiple, one per scheduler + total)
-    events = collect_events(ref, [], 100)
+    events = collect_events(telemetry_ref, [], 100)
 
     # Should have at least 2 events (normal schedulers + total)
     assert length(events) >= 2

@@ -17,13 +17,13 @@ defmodule Logflare.SystemMetricsSup do
       # SystemMetrics.Procs.Poller,
       SystemMetrics.AllLogsLogged,
       SystemMetrics.AllLogsLogged.Poller,
-      SystemMetrics.Schedulers.Poller,
       # telemetry poller
       {
         :telemetry_poller,
         measurements: [
           {Observer, :dispatch_stats, []},
-          {Cluster, :dispatch_stats, []}
+          {Cluster, :dispatch_stats, []},
+          {SystemMetrics.Schedulers.Measurements, :dispatch_utilization, []}
         ],
         period: :timer.seconds(30),
         init_delay: :timer.seconds(30),
