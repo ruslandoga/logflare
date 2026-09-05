@@ -3,6 +3,7 @@ defmodule LogflareWeb.EndpointsLiveTest do
 
   use LogflareWeb.ConnCase
 
+  import ExUnit.CaptureLog
   import Logflare.ClickHouseMappedEvents, only: [build_mapped_log_event: 1]
   import Logflare.DataCase, only: [setup_clickhouse_test: 1]
 
@@ -963,22 +964,26 @@ defmodule LogflareWeb.EndpointsLiveTest do
     test "sandbox query handles LQL parsing errors gracefully", %{conn: conn, endpoint: endpoint} do
       {:ok, view, _html} = live_with_redirect(conn, "/endpoints/#{endpoint.id}")
 
-      # Submit invalid LQL that will fail parsing
-      assert view
-             |> element("form", "Test Sandbox Query")
-             |> render_submit(%{
-               sandbox_form: %{
-                 query_mode: "lql",
-                 sandbox_query: "m.invalid:field:with:colons",
-                 params: %{},
-                 show_transformed: "false"
-               }
-             })
+      reject(Logflare.Backends.Adaptor.BigQueryAdaptor, :execute_query, 3)
 
-      html = render(view)
+      log =
+        capture_log(fn ->
+          view
+          |> element("form", "Test Sandbox Query")
+          |> render_submit(%{
+            sandbox_form: %{
+              query_mode: "lql",
+              sandbox_query: "timestamp:>20",
+              params: %{},
+              show_transformed: "false"
+            }
+          })
+        end)
 
-      assert html =~ "Error occurred when running sandbox query" or
-               has_element?(view, "h5", "Sandbox Query Error")
+      assert log =~ "Sandbox query failed"
+      assert log =~ "Error while parsing timestamp"
+      assert render(view) =~ "Error occurred when running sandbox query"
+      assert has_element?(view, ".alert-danger", "Please verify your query syntax.")
     end
 
     test "sandbox query section preserves query input on error", %{conn: conn, endpoint: endpoint} do
