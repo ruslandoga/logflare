@@ -122,6 +122,7 @@ defmodule Logflare.Backends.Adaptor.ClickHouseAdaptorTest do
               }} = ClickHouseAdaptor.execute_ch_query(backend, "SELECT notthere")
     end
 
+    @tag capture_log: true
     test "normalizes ClickHouse server errors as backend errors", %{backend: backend} do
       expect(Ch, :query, fn _pool, _statement, _params, _opts ->
         {:error, %Ch.Error{code: 999, message: "Backend server error"}}
@@ -214,6 +215,7 @@ defmodule Logflare.Backends.Adaptor.ClickHouseAdaptorTest do
       assert measurements.idle_time < minute_in_native
     end
 
+    @tag capture_log: true
     test "emits query error telemetry with the error kind", %{backend: backend} do
       TestUtils.attach_forwarder([:logflare, :clickhouse, :read_pool, :query_error])
 
@@ -1126,6 +1128,7 @@ defmodule Logflare.Backends.Adaptor.ClickHouseAdaptorTest do
       refute_received {:telemetry_event, [:logflare, :clickhouse, :read_pool, :query_error], _, _}
     end
 
+    @tag capture_log: true
     test "preserves the endpoint limit when falling back to the default cluster" do
       {_source, backend} =
         setup_clickhouse_test(
@@ -1159,6 +1162,7 @@ defmodule Logflare.Backends.Adaptor.ClickHouseAdaptorTest do
       assert ConnectionManager.pool_active?(backend, "dashboard_logs")
     end
 
+    @tag capture_log: true
     test "does not fall back when the requested cluster pool is exhausted" do
       {_source, backend} =
         setup_clickhouse_test(
@@ -1182,6 +1186,7 @@ defmodule Logflare.Backends.Adaptor.ClickHouseAdaptorTest do
       refute ConnectionManager.pool_active?(backend, "dashboard_logs")
     end
 
+    @tag capture_log: true
     test "does not fall back when the unhealthy cluster is already the default" do
       {_source, backend} =
         setup_clickhouse_test(
