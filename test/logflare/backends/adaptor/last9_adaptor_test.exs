@@ -35,6 +35,7 @@ defmodule Logflare.Backends.Adaptor.Last9AdaptorTest do
   end
 
   setup do
+    stub(Logflare.Google.BigQuery, :get_table, fn _ -> {:error, :not_found} end)
     start_supervised!(AllLogsLogged)
     insert(:plan)
     :ok
