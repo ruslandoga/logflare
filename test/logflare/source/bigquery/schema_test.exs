@@ -18,7 +18,7 @@ defmodule Logflare.Sources.Source.BigQuery.SchemaTest do
     assert seconds > 9
   end
 
-  test "updates correctly" do
+  test "updates schema and throttles subsequent updates" do
     user = insert(:user)
     source = insert(:source, user: user)
     schema = TestUtils.default_bq_schema()
@@ -29,8 +29,6 @@ defmodule Logflare.Sources.Source.BigQuery.SchemaTest do
       bigquery_schema: schema,
       schema_flat_map: SchemaUtils.bq_schema_to_flat_typemap(schema)
     )
-
-    test_pid = self()
 
     GoogleApi.BigQuery.V2.Api.Tables
     |> expect(:bigquery_tables_patch, 1, fn _conn,
@@ -43,7 +41,6 @@ defmodule Logflare.Sources.Source.BigQuery.SchemaTest do
       assert %_{name: "test", type: "INTEGER"} =
                TestUtils.get_bq_field_schema(schema, "metadata.test")
 
-      send(test_pid, :ok)
       {:ok, %{}}
     end)
 
@@ -64,13 +61,14 @@ defmodule Logflare.Sources.Source.BigQuery.SchemaTest do
     le = build(:log_event, source: source, metadata: %{"test" => 123})
     assert :ok = Schema.update(pid, le, source)
 
-    TestUtils.retry_assert(fn ->
-      assert_received :ok
-    end)
+    state =
+      :sys.replace_state(pid, fn state ->
+        %{state | next_update: System.system_time(:millisecond) + :timer.minutes(1)}
+      end)
 
-    # subsequent updates do not increase mock count
     le = build(:log_event, source: source, metadata: %{"change" => 123})
     assert :ok = Schema.update(pid, le, source)
+    assert ^state = :sys.get_state(pid)
   end
 
   test "default notifications config" do
