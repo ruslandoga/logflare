@@ -152,7 +152,8 @@ defmodule Logflare.DataCase do
       password: "logflare",
       port: 8123,
       ingest_pool_size: 5,
-      query_pool_size: 3
+      read_pool_size: 3,
+      labeled_read_pool_size: 3
     }
 
     backend =
