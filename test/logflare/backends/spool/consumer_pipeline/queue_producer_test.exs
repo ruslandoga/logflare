@@ -346,6 +346,7 @@ defmodule Logflare.Backends.Spool.ConsumerPipeline.QueueProducerTest do
   end
 
   describe "prefetch task crash resilience" do
+    @tag capture_log: true
     test "a crashing prefetch does not permanently stall the producer" do
       stub_ack_nack(self())
 
@@ -376,6 +377,7 @@ defmodule Logflare.Backends.Spool.ConsumerPipeline.QueueProducerTest do
       assert_receive {:acked, "h1"}, 2000
     end
 
+    @tag capture_log: true
     test "a crashing blocking fetch does not kill the producer process" do
       stub_ack_nack(self())
 
@@ -441,6 +443,7 @@ defmodule Logflare.Backends.Spool.ConsumerPipeline.QueueProducerTest do
                       %{reason: :no_file_key}}
     end
 
+    @tag capture_log: true
     test "acks with reason: :decode_error and drops the message when the downloaded content is not valid ETF" do
       TestUtils.attach_forwarder([:logflare, :backends, :spool, :queue, :ack])
 
@@ -461,6 +464,7 @@ defmodule Logflare.Backends.Spool.ConsumerPipeline.QueueProducerTest do
                       %{reason: :decode_error}}
     end
 
+    @tag capture_log: true
     test "acks with reason: :decode_error when the downloaded .gz content is not valid gzip" do
       TestUtils.attach_forwarder([:logflare, :backends, :spool, :queue, :ack])
 

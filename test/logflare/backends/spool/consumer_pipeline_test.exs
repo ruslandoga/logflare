@@ -144,6 +144,7 @@ defmodule Logflare.Backends.Spool.ConsumerPipelineTest do
   end
 
   describe "ack/3" do
+    @tag capture_log: true
     test "emits messages_failed telemetry when Broadway marks messages as failed" do
       TestUtils.attach_forwarder([:logflare, :backends, :spool, :consumer, :messages_failed])
 
