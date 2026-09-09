@@ -547,6 +547,7 @@ defmodule LogflareWeb.EndpointsLiveTest do
   end
 
   describe "run query errors" do
+    @tag capture_log: true
     test "backend errors display a generic message", %{conn: conn, user: user} do
       endpoint = insert(:endpoint, user: user, query: "select current_datetime() as ts")
 
