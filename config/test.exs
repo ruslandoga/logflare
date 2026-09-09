@@ -18,6 +18,10 @@ config :logflare, Logflare.Backends.Adaptor.SyslogAdaptor.Pipeline,
   producer_interval: 10,
   batch_timeout: 10
 
+config :logflare, Logflare.Sources.Source.BigQuery.Pipeline,
+  producer_interval: 10,
+  batch_timeout: 10
+
 config :logflare, Logflare.Sources.Source.BigQuery.Schema, updates_per_minute: 900_000
 
 config :logflare, Logflare.Google,

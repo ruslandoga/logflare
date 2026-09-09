@@ -114,7 +114,7 @@ defmodule Logflare.Backends.Adaptor.Last9AdaptorTest do
       :ok
     end
 
-    test "sends logs via REST API", %{source: source} do
+    test "sends logs via REST API", %{source: source, backend: backend} do
       this = self()
       ref = make_ref()
 
@@ -130,7 +130,7 @@ defmodule Logflare.Backends.Adaptor.Last9AdaptorTest do
 
       log_events = build_list(3, :log_event, source: source)
 
-      assert {:ok, _} = Backends.ingest_logs(log_events, source)
+      assert {:ok, _} = Backends.ingest_logs(log_events, source, backend)
       assert_receive {^ref, body}, 5000
       assert request = Protobuf.decode(body, ExportLogsServiceRequest)
       assert %{resource_logs: [%{scope_logs: [%{log_records: [_, _, _]}]}]} = request

@@ -1112,20 +1112,31 @@ defmodule Logflare.BackendsTest do
     test "cache_estimated_buffer_lens/1 will cache all queue information", %{
       source: %{id: source_id} = source
     } do
-      assert {:ok,
-              %{
-                len: 0,
-                queues: [_, _]
-              }} = Backends.cache_local_buffer_lens(source_id)
+      [producer] =
+        for {^source_id, nil, pid} <- IngestEventQueue.list_queues({source_id, nil}),
+            is_pid(pid),
+            do: pid
 
-      events = for _n <- 1..5, do: build(:log_event, source: source, some: "event")
-      assert {:ok, 5} = Backends.ingest_logs(events, source)
+      :ok = :sys.suspend(producer)
 
-      assert {:ok,
-              %{
-                len: 5,
-                queues: [_, _]
-              }} = Backends.cache_local_buffer_lens(source_id)
+      try do
+        assert {:ok,
+                %{
+                  len: 0,
+                  queues: [_, _]
+                }} = Backends.cache_local_buffer_lens(source_id)
+
+        events = for _n <- 1..5, do: build(:log_event, source: source, some: "event")
+        assert {:ok, 5} = Backends.ingest_logs(events, source)
+
+        assert {:ok,
+                %{
+                  len: 5,
+                  queues: [_, _]
+                }} = Backends.cache_local_buffer_lens(source_id)
+      after
+        :sys.resume(producer)
+      end
     end
 
     test "emits telemetry events for backend ingestion", %{source: source} do

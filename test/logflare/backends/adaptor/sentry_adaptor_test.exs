@@ -95,7 +95,7 @@ defmodule Logflare.Backends.Adaptor.SentryAdaptorTest do
       [backend: backend, source: source]
     end
 
-    test "sends logs as a serialized sentry envelope", %{source: source} do
+    test "sends logs as a serialized sentry envelope", %{source: source, backend: backend} do
       this = self()
       ref = make_ref()
 
@@ -117,7 +117,7 @@ defmodule Logflare.Backends.Adaptor.SentryAdaptorTest do
         )
       ]
 
-      assert {:ok, _} = Backends.ingest_logs(log_events, source)
+      assert {:ok, _} = Backends.ingest_logs(log_events, source, backend)
       assert_receive {^ref, envelope_body}, 2000
 
       [header_line, item_header_line, item_payload_line] = String.split(envelope_body, "\n")
@@ -157,7 +157,7 @@ defmodule Logflare.Backends.Adaptor.SentryAdaptorTest do
       assert item["timestamp"]
     end
 
-    test "maps to different log levels", %{source: source} do
+    test "maps to different log levels", %{source: source, backend: backend} do
       this = self()
       ref = make_ref()
 
@@ -192,7 +192,7 @@ defmodule Logflare.Backends.Adaptor.SentryAdaptorTest do
           )
         end)
 
-      assert {:ok, _} = Backends.ingest_logs(log_events, source)
+      assert {:ok, _} = Backends.ingest_logs(log_events, source, backend)
       assert_receive {^ref, envelope_body}, 2000
 
       [_header_line, _item_header_line, item_payload_line] = String.split(envelope_body, "\n")
@@ -210,7 +210,7 @@ defmodule Logflare.Backends.Adaptor.SentryAdaptorTest do
       end
     end
 
-    test "handles multiple log events in single batch", %{source: source} do
+    test "handles multiple log events in single batch", %{source: source, backend: backend} do
       this = self()
       ref = make_ref()
 
@@ -237,7 +237,7 @@ defmodule Logflare.Backends.Adaptor.SentryAdaptorTest do
         )
       ]
 
-      assert {:ok, _} = Backends.ingest_logs(log_events, source)
+      assert {:ok, _} = Backends.ingest_logs(log_events, source, backend)
       assert_receive {^ref, envelope_body}, 2000
 
       [_header_line, item_header_line, item_payload_line] = String.split(envelope_body, "\n")
@@ -256,7 +256,7 @@ defmodule Logflare.Backends.Adaptor.SentryAdaptorTest do
       assert "Log 3" in messages
     end
 
-    test "handles different data types in attributes", %{source: source} do
+    test "handles different data types in attributes", %{source: source, backend: backend} do
       this = self()
       ref = make_ref()
 
@@ -288,7 +288,7 @@ defmodule Logflare.Backends.Adaptor.SentryAdaptorTest do
         )
       ]
 
-      assert {:ok, _} = Backends.ingest_logs(log_events, source)
+      assert {:ok, _} = Backends.ingest_logs(log_events, source, backend)
       assert_receive {^ref, envelope_body}, 2000
 
       [_header_line, _item_header_line, item_payload_line] = String.split(envelope_body, "\n")
@@ -319,7 +319,7 @@ defmodule Logflare.Backends.Adaptor.SentryAdaptorTest do
       refute Map.has_key?(attributes, "metadata")
     end
 
-    test "falls back to metadata.level when level is not set", %{source: source} do
+    test "falls back to metadata.level when level is not set", %{source: source, backend: backend} do
       this = self()
       ref = make_ref()
 
@@ -340,7 +340,7 @@ defmodule Logflare.Backends.Adaptor.SentryAdaptorTest do
         )
       ]
 
-      assert {:ok, _} = Backends.ingest_logs(log_events, source)
+      assert {:ok, _} = Backends.ingest_logs(log_events, source, backend)
       assert_receive {^ref, envelope_body}, 2000
 
       [_header_line, _item_header_line, item_payload_line] = String.split(envelope_body, "\n")
@@ -359,7 +359,7 @@ defmodule Logflare.Backends.Adaptor.SentryAdaptorTest do
       assert item["attributes"]["metadata.level"] == %{"type" => "string", "value" => "warning"}
     end
 
-    test "prefers top-level level over metadata.level", %{source: source} do
+    test "prefers top-level level over metadata.level", %{source: source, backend: backend} do
       this = self()
       ref = make_ref()
 
@@ -380,7 +380,7 @@ defmodule Logflare.Backends.Adaptor.SentryAdaptorTest do
         )
       ]
 
-      assert {:ok, _} = Backends.ingest_logs(log_events, source)
+      assert {:ok, _} = Backends.ingest_logs(log_events, source, backend)
       assert_receive {^ref, envelope_body}, 2000
 
       [_header_line, _item_header_line, item_payload_line] = String.split(envelope_body, "\n")
