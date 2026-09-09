@@ -955,10 +955,18 @@ defmodule Logflare.EndpointsTest do
             key -> Map.new([{key, 123}])
           end
 
+        monitor_ref = Process.monitor(cache_pid)
         assert {:ok, updated} = Endpoints.update_query(user, endpoint, params, user)
-        # should kill the cache process
-        :timer.sleep(500)
-        refute Process.alive?(cache_pid)
+        assert_receive {:DOWN, ^monitor_ref, :process, ^cache_pid, :normal}
+
+        TestUtils.retry_assert(fn ->
+          assert GenServer.whereis(Logflare.Endpoints.ResultsCache.name(endpoint.id, %{})) == nil
+        end)
+
+        start_supervised!({Logflare.Endpoints.ResultsCache, {updated, %{}, []}},
+          id: :replacement_cache
+        )
+
         # 2nd query should not hit cache
         assert {:ok, %{rows: [%{"testing" => _}]}} = Endpoints.run_cached_query(updated)
       end
