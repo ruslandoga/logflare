@@ -37,6 +37,8 @@ defmodule LogflareWeb.LogControllerTest do
       backend =
         insert(:backend, sources: [source], type: :webhook, config: %{url: "some url"})
 
+      start_supervised!({SourceSup, source})
+
       {:ok, source: source, user: user, backend: backend}
     end
 
@@ -331,6 +333,7 @@ defmodule LogflareWeb.LogControllerTest do
       user = insert(:user)
       source = insert(:source, user: user)
       insert(:plan, name: "Free")
+      start_supervised!({SourceSup, source})
 
       log =
         capture_log(fn ->
@@ -350,6 +353,7 @@ defmodule LogflareWeb.LogControllerTest do
       user = insert(:user)
       source = insert(:source, user: user)
       insert(:plan, name: "Free")
+      start_supervised!({SourceSup, source})
 
       log =
         capture_log(fn ->
