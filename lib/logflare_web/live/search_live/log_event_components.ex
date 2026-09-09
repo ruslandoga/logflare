@@ -48,8 +48,7 @@ defmodule LogflareWeb.SearchLive.LogEventComponents do
     ~H"""
     <div :if={@search_op_log_events} id="source-logs-search-list" data-tailing={if(@tailing?, do: "true", else: "false")} phx-hook="SourceLogsSearchList" class="mt-4 tw-relative">
       <.load_more_button id="load-more-events-top" intent="previous" state={@pagination_buttons.previous.state} cursor={@pagination_buttons.previous.cursor} />
-      <ul id="logs-list" phx-update="stream" class={["list-unstyled console-text-list", if(@loading, do: "blurred", else: nil)]}>
-        <.empty_result_list search_op_log_events={@search_op_log_events} earlier_result_dt={@earlier_result_dt} loading={@loading} />
+      <ul id="logs-list" phx-update="stream" class={["list-unstyled console-text-list tw-peer", if(@loading, do: "blurred", else: nil)]}>
         <.log_event :for={{dom_id, log} <- @log_events} id={dom_id} data-event-id={event_id(log)} data-event-timestamp={log.body["timestamp"]} timezone={@search_timezone} log_event={log} select_fields={@select_fields} source_schema_flat_map={@source_schema_flat_map}>
           {log.body["event_message"]}
           <:actions phx-no-format>
@@ -97,6 +96,7 @@ defmodule LogflareWeb.SearchLive.LogEventComponents do
                </:actions>
         </.log_event>
       </ul>
+      <.empty_result_list search_op_log_events={@search_op_log_events} earlier_result_dt={@earlier_result_dt} loading={@loading} />
       <.load_more_button id="load-more-events-bottom" intent="next" state={@pagination_buttons.next.state} cursor={@pagination_buttons.next.cursor} />
     </div>
     """
@@ -306,7 +306,7 @@ defmodule LogflareWeb.SearchLive.LogEventComponents do
 
   def empty_result_list(assigns) do
     ~H"""
-    <li id="empty-search-results" class={["tw-mt-4 tw-px-4 tw-py-3 tw-text-center tw-font-sans only:tw-block hidden", if(@loading, do: "tw-hidden", else: nil)]}>
+    <div id="empty-search-results" class={["tw-mt-4 tw-px-4 tw-py-3 tw-text-center tw-font-sans peer-has-[li]:tw-hidden", if(@loading, do: "tw-hidden", else: nil)]}>
       <h2 class="tw-text-lg tw-font-semibold tw-text-gray-400">
         No events matching your query
       </h2>
@@ -321,7 +321,7 @@ defmodule LogflareWeb.SearchLive.LogEventComponents do
           <i class="fas fa-search"></i><span class="fas-in-button hide-on-mobile">Extend search</span>
         </.link>
       </div>
-    </li>
+    </div>
     """
   end
 

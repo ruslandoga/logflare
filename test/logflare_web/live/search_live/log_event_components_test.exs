@@ -64,6 +64,14 @@ defmodule LogflareWeb.SearchLive.LogEventComponentsTest do
 
       assert html =~ "Log message 1"
       assert html =~ ~s(data-tailing="false")
+
+      document = Floki.parse_fragment!(html)
+
+      assert ["log-events-0"] =
+               document |> Floki.find("#logs-list > *") |> Floki.attribute("id")
+
+      assert [_empty_state] =
+               Floki.find(document, "#logs-list.tw-peer + div#empty-search-results")
     end
 
     test "renders loading state", %{search_op_log_events: search_op_log_events} do
@@ -75,6 +83,40 @@ defmodule LogflareWeb.SearchLive.LogEventComponentsTest do
         })
 
       assert html =~ ~r|id="logs-list".*class="(.*)blurred"|
+
+      empty_state_classes =
+        html
+        |> Floki.parse_fragment!()
+        |> Floki.find("#empty-search-results")
+        |> Floki.attribute("class")
+        |> Enum.join(" ")
+        |> String.split()
+
+      assert "tw-hidden" in empty_state_classes
+    end
+
+    test "renders the empty state beside the event stream", %{
+      search_op_log_events: search_op_log_events
+    } do
+      document =
+        render_component(&LogEventComponents.results_list/1, %{
+          @default_attrs
+          | search_op_log_events: %{search_op_log_events | rows: []}
+        })
+        |> Floki.parse_fragment!()
+
+      assert [] = Floki.find(document, "#logs-list > *")
+
+      assert [empty_state] =
+               Floki.find(document, "#logs-list.tw-peer + div#empty-search-results")
+
+      assert Floki.text(empty_state) =~ "No events matching your query"
+
+      empty_state_classes =
+        empty_state |> Floki.attribute("class") |> Enum.join(" ") |> String.split()
+
+      assert "peer-has-[li]:tw-hidden" in empty_state_classes
+      refute "tw-hidden" in empty_state_classes
     end
 
     test "renders the previous-page pagination button", %{
