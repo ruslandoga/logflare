@@ -14,6 +14,10 @@ config :logflare, LogflareWeb.Endpoint,
 
 config :logflare, Logflare.Cluster.Utils, min_cluster_size: 1
 
+config :logflare, Logflare.Backends.Adaptor.PostgresAdaptor.Pipeline,
+  producer_interval: 10,
+  batch_timeout: 10
+
 config :logflare, Logflare.Backends.Adaptor.SyslogAdaptor.Pipeline,
   producer_interval: 10,
   batch_timeout: 10
