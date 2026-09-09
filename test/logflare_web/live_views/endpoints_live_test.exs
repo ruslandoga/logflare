@@ -1018,6 +1018,7 @@ defmodule LogflareWeb.EndpointsLiveTest do
       assert has_element?(view, ".alert-danger", "Please verify your query syntax.")
     end
 
+    @tag capture_log: true
     test "sandbox query section preserves query input on error", %{conn: conn, endpoint: endpoint} do
       {:ok, view, _html} = live_with_redirect(conn, "/endpoints/#{endpoint.id}")
 
