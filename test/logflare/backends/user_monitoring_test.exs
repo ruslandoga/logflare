@@ -312,9 +312,6 @@ defmodule Logflare.Backends.UserMonitoringTest do
       assert {:ok, _} =
                Backends.ingest_logs([%{"metadata" => %{"value" => "different"}}], other_source)
 
-      # Pipeline #1 has flushed and emitted telemetry. Remaining latency before
-      # the stub fires is one OtelMetricExporter tick (≤100ms in :test) plus
-      # pipeline #2's batch_timeout (~1.5s).
       assert_receive {^test_ref, :ingest_emitted}, 10_000
 
       source_id = source.id
@@ -349,7 +346,10 @@ defmodule Logflare.Backends.UserMonitoringTest do
 
       GoogleApi.BigQuery.V2.Api.Tabledata
       |> stub(:bigquery_tabledata_insert_all, fn _, _, _, _, opts ->
-        send(pid, {:insert_all, opts[:body].rows})
+        for %{json: %{"event_message" => "logflare.backends.ingest.egress.request_bytes"} = row} <-
+              opts[:body].rows,
+            do: send(pid, {:egress_metric, row})
+
         {:ok, %GoogleApi.BigQuery.V2.Model.TableDataInsertAllResponse{insertErrors: nil}}
       end)
 
@@ -374,19 +374,7 @@ defmodule Logflare.Backends.UserMonitoringTest do
 
       assert {:ok, _} = Backends.ingest_logs([%{"message" => "test webhook egress"}], source)
 
-      assert_receive {:insert_all, [%{json: %{"attributes" => _}} | _] = rows}, 15_000
-
-      rows = for row <- rows, do: row.json
-
-      egress_row =
-        Enum.find(
-          rows,
-          &match?(%{"event_message" => "logflare.backends.ingest.egress.request_bytes"}, &1)
-        )
-
-      assert egress_row, "Expected egress metric to be present"
-
-      [attributes] = egress_row["attributes"]
+      assert_receive {:egress_metric, %{"attributes" => [attributes]}}, 15_000
 
       assert attributes["source_id"] == source.id
       assert attributes["user_id"] == user.id
