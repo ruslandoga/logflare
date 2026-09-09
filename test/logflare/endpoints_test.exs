@@ -9,6 +9,7 @@ defmodule Logflare.EndpointsTest do
   alias Logflare.Backends.Adaptor.QueryResult
   alias Logflare.Endpoints
   alias Logflare.Endpoints.EndpointQuery
+  alias Logflare.Endpoints.ResultsCache
   alias PaperTrail.Version
 
   @endpoint_query_attrs %{
@@ -960,7 +961,7 @@ defmodule Logflare.EndpointsTest do
         assert_receive {:DOWN, ^monitor_ref, :process, ^cache_pid, :normal}
 
         TestUtils.retry_assert(fn ->
-          assert GenServer.whereis(Logflare.Endpoints.ResultsCache.name(endpoint.id, %{})) == nil
+          assert GenServer.whereis(ResultsCache.name(endpoint.id, %{})) == nil
         end)
 
         start_supervised!({Logflare.Endpoints.ResultsCache, {updated, %{}, []}},
