@@ -11,14 +11,20 @@ defmodule Logflare.Backends.Adaptor.PostgresAdaptor.Pipeline do
   alias Logflare.Backends.BufferProducer
   alias Logflare.Utils
 
-  @spec start_link(PostgresAdaptor.t()) :: {:ok, pid()}
-  def start_link(adaptor_state) do
+  @spec start_link(PostgresAdaptor.t(), keyword()) :: Broadway.on_start()
+  def start_link(adaptor_state, opts \\ []) do
+    opts = Keyword.merge(Application.get_env(:logflare, __MODULE__, []), opts)
+
     Broadway.start_link(__MODULE__,
       name: adaptor_state.pipeline_name,
       producer: [
         module:
           {BufferProducer,
-           [source_id: adaptor_state.source.id, backend_id: adaptor_state.backend.id]},
+           [
+             source_id: adaptor_state.source.id,
+             backend_id: adaptor_state.backend.id,
+             interval: Keyword.get(opts, :producer_interval, 1_000)
+           ]},
         transformer: {__MODULE__, :transform, []},
         concurrency: 1
       ],
@@ -26,7 +32,11 @@ defmodule Logflare.Backends.Adaptor.PostgresAdaptor.Pipeline do
         default: [concurrency: 5, min_demand: 1]
       ],
       batchers: [
-        pg: [concurrency: 5, batch_size: 350]
+        pg: [
+          concurrency: 5,
+          batch_size: 350,
+          batch_timeout: Keyword.get(opts, :batch_timeout, 1_000)
+        ]
       ],
       context: adaptor_state
     )
