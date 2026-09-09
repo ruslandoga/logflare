@@ -389,7 +389,16 @@ jobs:
           mix do ecto.create + ecto.migrate
 
       - name: Run tests
-        run: mix test.coverage.ci
+        env:
+          LOGFLARE_TEST_TIMINGS_PATH: ${{ runner.temp }}/elixir-test-timings.json
+        run: mix test.coverage.ci --formatter Logflare.CITimingFormatter --seed 662786
+
+      - name: Upload test timings
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: elixir-test-timings
+          path: ${{ runner.temp }}/elixir-test-timings.json
 
       - name: Upload coverage
         uses: coverallsapp/github-action@v2
