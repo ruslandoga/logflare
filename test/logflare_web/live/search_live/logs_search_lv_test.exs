@@ -1927,7 +1927,8 @@ defmodule LogflareWeb.Source.SearchLVTest do
 
     test "tailing inserts a late event at its timestamp position", %{
       conn: conn,
-      source: source
+      source: source,
+      user: user
     } do
       timestamp_a = DateTime.utc_now() |> DateTime.to_unix(:microsecond)
       timestamp_b = timestamp_a + 1
@@ -1959,6 +1960,7 @@ defmodule LogflareWeb.Source.SearchLVTest do
         )
 
       assert {:ok, 2} = Backends.ingest_logs([event_c, event_a], source)
+      assert :ok = TestUtils.wait_for_postgres_events(source, user, message_prefix, 2)
 
       {:ok, view, _html} = live_with_redirect(conn, Routes.live_path(conn, SearchLV, source.id))
 
