@@ -7,6 +7,8 @@ defmodule LogflareWeb.EndpointsLiveTest do
   import Logflare.ClickHouseMappedEvents, only: [build_mapped_log_event: 1]
   import Logflare.DataCase, only: [setup_clickhouse_test: 1]
 
+  alias Logflare.Backends.Adaptor.QueryResult
+
   setup %{conn: conn} do
     insert(:plan)
     user = insert(:user)
@@ -61,21 +63,42 @@ defmodule LogflareWeb.EndpointsLiveTest do
       attacker = insert(:user, endpoints_beta: true)
       victim = insert(:user, endpoints_beta: true)
       backend = insert(:postgres_backend, user: victim, config: postgres_backend_config())
+      attacker_id = attacker.id
+
+      expect(Logflare.Backends.Adaptor.BigQueryAdaptor, :execute_query, 1, fn query_backend,
+                                                                              _query,
+                                                                              _opts ->
+        assert %Logflare.Backends.Backend{
+                 id: nil,
+                 type: :bigquery,
+                 user_id: ^attacker_id
+               } = query_backend
+
+        {:ok,
+         QueryResult.new([
+           %{"testing" => "attacker-preview-result"}
+         ])}
+      end)
+
+      reject(Logflare.Backends.Adaptor.PostgresAdaptor.SharedRepo, :with_repo, 2)
 
       {:ok, view, _html} =
         conn
         |> login_user(attacker)
         |> live_with_redirect(~p"/endpoints/new")
 
-      view
-      |> element("form#endpoint")
-      |> render_change(%{
-        endpoint: %{
-          backend_id: backend.id,
-          name: "forged endpoint",
-          query: "SELECT 1 as testing"
-        }
-      })
+      html =
+        view
+        |> element("form#endpoint")
+        |> render_change(%{
+          endpoint: %{
+            backend_id: backend.id,
+            name: "forged endpoint",
+            query: "SELECT 1 as testing"
+          }
+        })
+
+      assert html =~ "Backend not found"
 
       html =
         view
@@ -87,7 +110,7 @@ defmodule LogflareWeb.EndpointsLiveTest do
           }
         })
 
-      assert html =~ "Backend not found"
+      assert html =~ "attacker-preview-result"
     end
   end
 
