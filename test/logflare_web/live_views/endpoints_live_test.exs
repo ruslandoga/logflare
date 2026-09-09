@@ -1060,37 +1060,40 @@ defmodule LogflareWeb.EndpointsLiveTest do
       assert html =~ "restricted to the CTE tables"
     end
 
-    test "sandbox query errors do not expose Ecto query internals", %{conn: conn, user: user} do
-      endpoint =
-        insert(:endpoint,
-          user: user,
-          sandboxable: true,
-          query: """
-          WITH event_logs AS (
-            SELECT timestamp, event_message FROM YourApp.SourceName
-          )
-          SELECT * FROM event_logs
-          """
-        )
+    test "sandbox query errors do not expose Ecto query internals", %{
+      conn: conn,
+      endpoint: endpoint
+    } do
+      endpoint_id = endpoint.id
+      raw_error = "%Ecto.Query{from e0 in private_events, select: field(e0, :timestamp)}"
+
+      expect(Logflare.Endpoints, :run_query, 1, fn
+        %Logflare.Endpoints.EndpointQuery{id: ^endpoint_id}, %{"lql" => "s:err"} ->
+          {:error, raw_error}
+      end)
 
       {:ok, view, _html} = live_with_redirect(conn, "/endpoints/#{endpoint.id}")
 
-      view
-      |> element("form", "Test Sandbox Query")
-      |> render_submit(%{
-        sandbox_form: %{
-          query_mode: "lql",
-          sandbox_query: "c:avg(timestamp)",
-          params: %{},
-          show_transformed: "false"
-        }
-      })
+      log =
+        capture_log(fn ->
+          view
+          |> element("form", "Test Sandbox Query")
+          |> render_submit(%{
+            sandbox_form: %{
+              query_mode: "lql",
+              sandbox_query: "s:err",
+              params: %{},
+              show_transformed: "false"
+            }
+          })
+        end)
 
-      # Should show error without exposing Ecto query internals
-      assert has_element?(view, ".alert-danger") or
-               has_element?(view, "h5", "Sandbox Query Error")
+      assert log =~ "Sandbox query failed"
+      assert log =~ raw_error
+      assert has_element?(view, ".alert-danger", "Please verify your query syntax.")
 
       html = render(view)
+      assert html =~ "Error occurred when running sandbox query"
       refute html =~ "field(e0"
       refute html =~ "from e0 in"
       refute html =~ "%Ecto.Query{"
