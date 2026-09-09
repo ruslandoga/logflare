@@ -878,27 +878,35 @@ defmodule LogflareWeb.EndpointsLiveTest do
       assert render(view) =~ "test error"
     end
 
-    test "displays error for invalid table reference in sandbox query", %{
+    test "rejects owned sources outside sandbox CTEs", %{
       conn: conn,
-      endpoint: endpoint
+      endpoint: endpoint,
+      user: user
     } do
+      insert(:source, user: user, name: "unauthorized_table")
+
       {:ok, view, _html} = live_with_redirect(conn, "/endpoints/#{endpoint.id}")
 
-      view
-      |> element("form", "Test Sandbox Query")
-      |> render_submit(%{
-        sandbox_form: %{
-          query_mode: "sql",
-          sandbox_query: "SELECT * FROM unauthorized_table",
-          params: %{},
-          show_transformed: "false"
-        }
-      })
+      reject(Logflare.Backends.Adaptor.BigQueryAdaptor, :execute_query, 3)
 
-      html = render(view)
+      log =
+        capture_log(fn ->
+          view
+          |> element("form", "Test Sandbox Query")
+          |> render_submit(%{
+            sandbox_form: %{
+              query_mode: "sql",
+              sandbox_query: "SELECT err FROM unauthorized_table",
+              params: %{},
+              show_transformed: "false"
+            }
+          })
+        end)
 
-      assert html =~ "Error occurred when running sandbox query"
-      assert has_element?(view, ".alert-danger")
+      assert log =~ "Sandbox query failed"
+      assert log =~ "Table not found in CTE: (unauthorized_table)"
+      assert render(view) =~ "Error occurred when running sandbox query"
+      assert has_element?(view, ".alert-danger", "Please verify your query syntax.")
     end
 
     test "shows transformed query when checkbox is enabled", %{conn: conn, endpoint: endpoint} do
