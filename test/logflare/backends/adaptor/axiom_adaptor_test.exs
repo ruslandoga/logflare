@@ -115,7 +115,7 @@ defmodule Logflare.Backends.Adaptor.AxiomAdaptorTest do
       :ok
     end
 
-    test "sends logs via REST API", %{source: source} do
+    test "sends logs via REST API", %{source: source, backend: backend} do
       this = self()
       ref = make_ref()
 
@@ -141,7 +141,7 @@ defmodule Logflare.Backends.Adaptor.AxiomAdaptorTest do
           timestamp: System.system_time(:microsecond)
         )
 
-      assert {:ok, _} = Backends.ingest_logs([log_event], source)
+      assert {:ok, _} = Backends.ingest_logs([log_event], source, backend)
       assert_receive {^ref, gzipped}, 5000
       assert json = :zlib.gunzip(gzipped)
       assert [log] = Jason.decode!(json)
@@ -150,7 +150,7 @@ defmodule Logflare.Backends.Adaptor.AxiomAdaptorTest do
       assert log["random_attribute"] == "nothing"
     end
 
-    test "handles multiple log events in single batch", %{source: source} do
+    test "handles multiple log events in single batch", %{source: source, backend: backend} do
       this = self()
       ref = make_ref()
 
@@ -165,7 +165,7 @@ defmodule Logflare.Backends.Adaptor.AxiomAdaptorTest do
           timestamp: System.system_time(:microsecond)
         )
 
-      assert {:ok, _} = Backends.ingest_logs(log_events, source)
+      assert {:ok, _} = Backends.ingest_logs(log_events, source, backend)
       assert_receive {^ref, gzipped}, 5000
       assert json = :zlib.gunzip(gzipped)
       assert [_, _, _] = Jason.decode!(json)

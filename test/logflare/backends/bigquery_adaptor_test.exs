@@ -183,8 +183,8 @@ defmodule Logflare.Backends.BigQueryAdaptorTest do
       ref = make_ref()
 
       Logflare.Google.BigQuery
-      |> stub(:stream_batch!, fn _, _ ->
-        send(pid, ref)
+      |> stub(:stream_batch!, fn context, _ ->
+        send(pid, {ref, context.backend_id})
         {:ok, %GoogleApi.BigQuery.V2.Model.TableDataInsertAllResponse{insertErrors: nil}}
       end)
 
@@ -202,12 +202,8 @@ defmodule Logflare.Backends.BigQueryAdaptorTest do
 
       assert {:ok, _} = Backends.ingest_logs([log_event], source)
 
-      assert {:ok, %{len: 1}} = Backends.cache_local_buffer_lens(source_id, nil)
-      assert {:ok, %{len: 1}} = Backends.cache_local_buffer_lens(source_id, backend_id)
-
-      TestUtils.retry_assert(fn ->
-        assert_receive ^ref
-      end)
+      assert_receive {^ref, nil}, 2_500
+      assert_receive {^ref, ^backend_id}, 2_500
 
       assert_buffers_empty(source_id, backend_id)
     end

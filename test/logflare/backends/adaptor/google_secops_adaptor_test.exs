@@ -121,7 +121,7 @@ defmodule Logflare.Backends.Adaptor.GoogleSecOpsAdaptorTest do
       :ok
     end
 
-    test "sends newline-delimited events in a single request", %{source: source} do
+    test "sends newline-delimited events in a single request", %{source: source, backend: backend} do
       this = self()
       ref = make_ref()
 
@@ -145,7 +145,7 @@ defmodule Logflare.Backends.Adaptor.GoogleSecOpsAdaptorTest do
           )
         end
 
-      assert {:ok, _} = Backends.ingest_logs(log_events, source)
+      assert {:ok, _} = Backends.ingest_logs(log_events, source, backend)
       assert_receive {^ref, body}, 5000
 
       assert [_, _, _] = lines = String.split(IO.iodata_to_binary(body), "\n")

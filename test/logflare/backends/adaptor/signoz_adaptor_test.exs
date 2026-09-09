@@ -144,7 +144,7 @@ defmodule Logflare.Backends.Adaptor.SigNozAdaptorTest do
       :ok
     end
 
-    test "sends logs via OTLP/HTTP", %{source: source} do
+    test "sends logs via OTLP/HTTP", %{source: source, backend: backend} do
       this = self()
       ref = make_ref()
 
@@ -160,7 +160,7 @@ defmodule Logflare.Backends.Adaptor.SigNozAdaptorTest do
 
       log_events = build_list(3, :log_event, source: source)
 
-      assert {:ok, _} = Backends.ingest_logs(log_events, source)
+      assert {:ok, _} = Backends.ingest_logs(log_events, source, backend)
       assert_receive {^ref, body}, 5000
       assert request = Protobuf.decode(body, ExportLogsServiceRequest)
       assert %{resource_logs: [%{scope_logs: [%{log_records: [_, _, _]}]}]} = request
@@ -176,7 +176,8 @@ defmodule Logflare.Backends.Adaptor.SigNozAdaptorTest do
     end
 
     test "puts the message in the body and flattens everything else into attributes", %{
-      source: source
+      source: source,
+      backend: backend
     } do
       this = self()
       ref = make_ref()
@@ -193,7 +194,7 @@ defmodule Logflare.Backends.Adaptor.SigNozAdaptorTest do
           metadata: %{"parsed" => %{"error_severity" => "ERROR", "user_name" => "postgres"}}
         )
 
-      assert {:ok, _} = Backends.ingest_logs([log_event], source)
+      assert {:ok, _} = Backends.ingest_logs([log_event], source, backend)
       assert_receive {^ref, body}, 5000
 
       assert %{resource_logs: [%{scope_logs: [%{log_records: [record]}]}]} =
@@ -219,7 +220,10 @@ defmodule Logflare.Backends.Adaptor.SigNozAdaptorTest do
       :ok
     end
 
-    test "sends over plain http and omits the ingestion key header", %{source: source} do
+    test "sends over plain http and omits the ingestion key header", %{
+      source: source,
+      backend: backend
+    } do
       this = self()
       ref = make_ref()
 
@@ -233,7 +237,7 @@ defmodule Logflare.Backends.Adaptor.SigNozAdaptorTest do
 
       log_events = build_list(1, :log_event, source: source)
 
-      assert {:ok, _} = Backends.ingest_logs(log_events, source)
+      assert {:ok, _} = Backends.ingest_logs(log_events, source, backend)
       assert_receive {^ref, :sent}, 5000
     end
   end
