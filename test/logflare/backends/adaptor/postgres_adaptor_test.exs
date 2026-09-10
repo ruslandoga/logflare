@@ -7,6 +7,7 @@ defmodule Logflare.Backends.Adaptor.PostgresAdaptorTest do
   alias Logflare.Backends.Adaptor
   alias Logflare.Backends.Adaptor.PostgresAdaptor
   alias Logflare.Backends.Adaptor.PostgresAdaptor.SharedRepo
+  alias Logflare.Backends.Adaptor.PostgresAdaptor.Supervisor, as: RepoSupervisor
   alias Logflare.Backends.AdaptorSupervisor
   alias Logflare.Backends.Adaptor.QueryResult
   alias Logflare.Backends.QueryError
@@ -320,7 +321,7 @@ defmodule Logflare.Backends.Adaptor.PostgresAdaptorTest do
   end
 
   describe "separate config fields" do
-    test "special characters as password", %{source: source} do
+    test "passes passwords with special characters unchanged to the repo", %{source: source} do
       config = %{
         schema: nil,
         username: "some-invalid",
@@ -332,12 +333,19 @@ defmodule Logflare.Backends.Adaptor.PostgresAdaptorTest do
 
       backend = insert(:backend, type: :postgres, sources: [source], config: config)
 
-      capture_log(fn ->
-        assert {:ok, _pid} = start_supervised({AdaptorSupervisor, {source, backend}})
-      end) =~ "invalid_password"
+      expect(SharedRepo, :start_link, fn opts ->
+        assert Map.new(Keyword.take(opts, [:username, :password, :database, :hostname, :port])) ==
+                 Map.drop(config, [:schema])
+
+        refute Keyword.has_key?(opts, :url)
+
+        {:error, :test_start_stopped}
+      end)
+
+      assert {:error, :test_start_stopped} = SharedRepo.start(backend)
     end
 
-    test "cannot connect to invalid ", %{source: source} do
+    test "returns cannot_connect when inserting into an unreachable database", %{source: source} do
       config = %{
         username: "some-invalid",
         password: "!@#$",
@@ -349,12 +357,51 @@ defmodule Logflare.Backends.Adaptor.PostgresAdaptorTest do
       backend = insert(:backend, type: :postgres, sources: [source], config: config)
       log_event = build(:log_event, source: source, test: "data")
 
-      capture_log(fn ->
-        assert {:ok, _pid} = start_supervised({AdaptorSupervisor, {source, backend}})
+      log =
+        capture_log(fn ->
+          try do
+            assert PostgresAdaptor.insert_log_event(source, backend, log_event) ==
+                     {:error, :cannot_connect}
+          after
+            case RepoSupervisor.get(backend) do
+              {:ok, repo_pid, _metadata} ->
+                assert :ok = DynamicSupervisor.terminate_child(RepoSupervisor.Repos, repo_pid)
 
-        assert PostgresAdaptor.insert_log_event(source, backend, log_event) ==
-                 {:error, :cannot_connect}
-      end) =~ "invalid_password"
+              :error ->
+                :ok
+            end
+          end
+        end)
+
+      assert log =~ "tcp connect (localhost:1234)"
+      assert log =~ ":econnrefused"
+      assert RepoSupervisor.get(backend) == :error
+    end
+  end
+
+  describe "initialization" do
+    test "starts the adaptor and logs a warning when migration fails", %{
+      backend: backend,
+      source: source
+    } do
+      expect(SharedRepo, :migrate!, fn ^source -> {:error, :cannot_connect} end)
+
+      on_exit(fn ->
+        case RepoSupervisor.get(backend) do
+          {:ok, repo_pid, _metadata} ->
+            assert :ok = DynamicSupervisor.terminate_child(RepoSupervisor.Repos, repo_pid)
+
+          :error ->
+            :ok
+        end
+      end)
+
+      log =
+        capture_log(fn ->
+          assert {:ok, _pid} = start_supervised({AdaptorSupervisor, {source, backend}})
+        end)
+
+      assert log =~ "Failed to create events table: {:error, :cannot_connect}"
     end
   end
 
