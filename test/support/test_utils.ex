@@ -583,14 +583,18 @@ defmodule Logflare.TestUtils do
     parent = self()
     name = "wait-for-render-#{System.unique_integer()}"
 
-    :telemetry.attach(
-      name,
-      [:phoenix, :live_view, :render, :stop],
-      fn _event, _measurements, metadata, _config ->
-        send(parent, {:wait_for_render, metadata.socket.assigns})
-      end,
-      nil
-    )
+    :ok =
+      :telemetry.attach(
+        name,
+        [:phoenix, :live_view, :render, :stop],
+        fn _event, _measurements, metadata, _config ->
+          send(parent, {:wait_for_render, metadata.socket.assigns})
+        end,
+        nil
+      )
+
+    ExUnit.Callbacks.on_exit(fn -> :telemetry.detach(name) end)
+    :ok
   end
 
   @doc """
