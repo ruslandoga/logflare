@@ -91,6 +91,16 @@ defmodule Logflare.BackendsTest do
 
   describe "consolidated pipeline hooks" do
     setup do
+      pipeline_defaults = Application.fetch_env!(:logflare, ClickHousePipeline)
+
+      Application.put_env(
+        :logflare,
+        ClickHousePipeline,
+        Keyword.delete(pipeline_defaults, :batch_timeout)
+      )
+
+      on_exit(fn -> Application.put_env(:logflare, ClickHousePipeline, pipeline_defaults) end)
+
       insert(:plan, name: "Free")
       user = insert(:user)
 
