@@ -10,6 +10,7 @@ on:
     paths:
       - ".tool-versions"
       - "Cargo.toml"
+      - "VERSION"
       - "assets/**"
       - "lib/**"
       - "config/**"
@@ -45,6 +46,7 @@ jobs:
       backend: ${{ steps.changes.outputs.backend }}
       frontend: ${{ steps.changes.outputs.frontend }}
       quality: ${{ steps.changes.outputs.quality }}
+      static: ${{ steps.changes.outputs.static }}
       rust_changed: ${{ steps.changes.outputs.rust }}
     steps:
       - uses: actions/checkout@v6
@@ -64,58 +66,7 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: |
-          backend=true
-          frontend=true
-          quality=true
-          rust=true
-
-          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
-            echo "workflow_dispatch: running all checks"
-          elif git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null \
-            && git cat-file -e "${HEAD_SHA}^{commit}" 2>/dev/null \
-            && changed="$(git diff --name-only "$BASE_SHA...$HEAD_SHA")"; then
-            backend=false
-            frontend=false
-            quality=false
-            rust=false
-
-            while IFS= read -r path; do
-              case "$path" in
-                .github/workflows/elixir-ci.yml)
-                  backend=true
-                  frontend=true
-                  rust=true
-                  ;;
-                assets/*)
-                  frontend=true
-                  ;;
-                .tool-versions|Cargo.toml|Cargo.lock|native/mapper_ex/*)
-                  backend=true
-                  rust=true
-                  ;;
-                test/e2e/features/*)
-                  quality=true
-                  ;;
-                test/e2e/*)
-                  ;;
-                .github/scripts/*|config/*|docs/docs.logflare.com/docs/*|lib/*|native/*|priv/*|test/*|*.exs|*.lock|Dockerfile.base|Dockerfile.runner|Dockerfile.multi-step)
-                  backend=true
-                  ;;
-              esac
-            done <<< "$changed"
-          else
-            echo "::warning::Unable to determine changed files; running all checks"
-          fi
-
-          if [[ "$backend" == "true" ]]; then
-            quality=true
-          fi
-
-          echo "backend=$backend" >> "$GITHUB_OUTPUT"
-          echo "frontend=$frontend" >> "$GITHUB_OUTPUT"
-          echo "quality=$quality" >> "$GITHUB_OUTPUT"
-          echo "rust=$rust" >> "$GITHUB_OUTPUT"
+        run: .github/scripts/elixir_ci_changes.sh
 
   typing:
     name: Static checks
@@ -135,13 +86,13 @@ jobs:
           version-type: strict
 
       - name: Install Rust
-        if: needs.versions.outputs.backend == 'true'
+        if: needs.versions.outputs.static == 'true'
         uses: dtolnay/rust-toolchain@v1
         with:
           toolchain: ${{ needs.versions.outputs.rust }}
 
       - name: Restore Cargo cache
-        if: needs.versions.outputs.backend == 'true'
+        if: needs.versions.outputs.static == 'true'
         uses: actions/cache@v5
         with:
           path: |
@@ -165,13 +116,13 @@ jobs:
             mix-v5-${{ runner.os }}-${{ needs.versions.outputs.erlang }}-${{ needs.versions.outputs.elixir }}-${{ github.job }}-
 
       - name: Prepare in-app docs
-        if: needs.versions.outputs.backend == 'true'
+        if: needs.versions.outputs.static == 'true'
         run: |
           rm -rf priv/docs
           cp -R docs/docs.logflare.com/docs priv/docs
 
       - name: Restore Dialyzer PLT cache
-        if: needs.versions.outputs.backend == 'true'
+        if: needs.versions.outputs.static == 'true'
         uses: actions/cache@v5
         with:
           path: dialyzer
@@ -184,13 +135,17 @@ jobs:
         id: dependencies
         run: mix do deps.get + deps.loadpaths
 
+      - name: Check change detection
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: .github/scripts/test_elixir_ci_changes.sh
+
       - name: Check formatting
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: mix test.format
 
       - name: Compile with warnings as errors
         id: compile
-        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' && needs.versions.outputs.backend == 'true' }}
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' && needs.versions.outputs.static == 'true' }}
         run: mix test.compile
 
       - name: Check lint
