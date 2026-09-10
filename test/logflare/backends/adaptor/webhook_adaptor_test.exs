@@ -71,7 +71,7 @@ defmodule Logflare.Backends.WebhookAdaptorTest do
       assert_receive ^ref, 2000
     end
 
-    test "logs the batch size when JSON encoding fails", %{source: source} do
+    test "logs the batch size when JSON encoding fails", %{source: source, backend: backend} do
       this = self()
       ref = make_ref()
 
@@ -82,12 +82,26 @@ defmodule Logflare.Backends.WebhookAdaptorTest do
       end)
 
       les = for _ <- 1..2, do: build(:log_event, source: source)
+      source_id = source.id
+      backend_id = backend.id
 
       log =
         ExUnit.CaptureLog.capture_log(fn ->
+          TestUtils.attach_forwarder([:broadway, :batch_processor, :stop])
+
           assert {:ok, _} = Backends.ingest_logs(les, source)
           assert_receive ^ref, 2000
-          Process.sleep(100)
+
+          assert_receive {:telemetry_event, [:broadway, :batch_processor, :stop], _,
+                          %{
+                            context: %{source_id: ^source_id, backend_id: ^backend_id},
+                            batch_info: %{batcher: :http, size: 2},
+                            successful_messages: messages,
+                            failed_messages: []
+                          }},
+                         2000
+
+          assert MapSet.new(messages, & &1.data.id) == MapSet.new(les, & &1.id)
         end)
 
       assert log =~ "Dropped 2 log events from webhook batch: JSON encoding failed"
@@ -160,11 +174,12 @@ defmodule Logflare.Backends.WebhookAdaptorTest do
     end
 
     test "skips the request when every event is dropped", %{source: source} do
-      insert(:backend,
-        type: :webhook,
-        sources: [source],
-        config: %{http: "http1", url: "https://example.com", format: "ndjson"}
-      )
+      backend =
+        insert(:backend,
+          type: :webhook,
+          sources: [source],
+          config: %{http: "http1", url: "https://example.com", format: "ndjson"}
+        )
 
       start_supervised!({SourceSup, source})
 
@@ -176,10 +191,25 @@ defmodule Logflare.Backends.WebhookAdaptorTest do
           build(:log_event, source: source, unencodable: <<0xFF>>)
         end
 
+      source_id = source.id
+      backend_id = backend.id
+
       log =
         ExUnit.CaptureLog.capture_log(fn ->
+          TestUtils.attach_forwarder([:broadway, :batch_processor, :stop])
+
           assert {:ok, _} = Backends.ingest_logs(les, source)
-          Process.sleep(500)
+
+          assert_receive {:telemetry_event, [:broadway, :batch_processor, :stop], _,
+                          %{
+                            context: %{source_id: ^source_id, backend_id: ^backend_id},
+                            batch_info: %{batcher: :http, size: 2},
+                            successful_messages: messages,
+                            failed_messages: []
+                          }},
+                         2000
+
+          assert MapSet.new(messages, & &1.data.id) == MapSet.new(les, & &1.id)
         end)
 
       assert log =~ "Skipped webhook batch: all 2 log events were dropped"
