@@ -63,9 +63,9 @@ jobs:
       - name: Detect affected checks
         id: changes
         env:
-          EVENT_NAME: ${{ github.event_name }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          EVENT_NAME: pull_request
+          BASE_SHA: 15dbd6511744ee45e28b3cfd64559f22a959f9e0
+          HEAD_SHA: 0f085aaf3926745e1b9641a43e3010350d0e7508
         run: .github/scripts/elixir_ci_changes.sh
 
   typing:
