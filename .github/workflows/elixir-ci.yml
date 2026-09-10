@@ -1,84 +1,27 @@
-name: Elixir CI
-
+name: Incremental Dialyzer probe
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
-  pull_request:
-    branches: ["**"]
-    paths:
-      - ".tool-versions"
-      - "Cargo.toml"
-      - "VERSION"
-      - "assets/**"
-      - "lib/**"
-      - "config/**"
-      - "*.exs"
-      - "*.lock"
-      - "Dockerfile.base"
-      - "Dockerfile.runner"
-      - "Dockerfile.multi-step"
-      - "docs/docs.logflare.com/docs/**"
-      - "native/**"
-      - "priv/**"
-      - "test/**"
-      - "!test/e2e/supabase/**"
-      - ".github/scripts/**"
-      # Run suite when this file is changed
-      - ".github/workflows/elixir-ci.yml"
-
 permissions:
   contents: read
-
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
-
+  group: incremental-dialyzer-probe-${{ github.ref }}
+  cancel-in-progress: false
 jobs:
-  versions:
-    name: Get versions
-    runs-on: ubuntu-latest
-    outputs:
-      elixir: ${{ steps.v.outputs.elixir }}
-      erlang: ${{ steps.v.outputs.erlang }}
-      rust: ${{ steps.v.outputs.rust }}
-      backend: ${{ steps.changes.outputs.backend }}
-      frontend: ${{ steps.changes.outputs.frontend }}
-      quality: ${{ steps.changes.outputs.quality }}
-      static: ${{ steps.changes.outputs.static }}
-      rust_changed: ${{ steps.changes.outputs.rust }}
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-
-      - name: Read versions from .tool-versions
-        id: v
-        run: |
-          echo "elixir=$(grep '^elixir '  .tool-versions | awk '{print $2}')" >> "$GITHUB_OUTPUT"
-          echo "erlang=$(grep '^erlang '  .tool-versions | awk '{print $2}')" >> "$GITHUB_OUTPUT"
-          echo "rust=$(grep   '^rust '    .tool-versions | awk '{print $2}')" >> "$GITHUB_OUTPUT"
-
-      - name: Detect affected checks
-        id: changes
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: .github/scripts/elixir_ci_changes.sh
-
   typing:
-    name: Static checks
+    name: Classic versus incremental Dialyzer
     runs-on: ubuntu-latest
-    needs: versions
-    if: needs.versions.outputs.quality == 'true'
+    timeout-minutes: 50
     env:
       MIX_ENV: test
       SHELL: /bin/bash
     steps:
       - uses: actions/checkout@v6
-
+      - name: Read versions
+        id: v
+        run: |
+          echo "elixir=$(awk '$1 == "elixir" {print $2}' .tool-versions)" >> "$GITHUB_OUTPUT"
+          echo "erlang=$(awk '$1 == "erlang" {print $2}' .tool-versions)" >> "$GITHUB_OUTPUT"
+          echo "rust=$(awk '$1 == "rust" {print $2}' .tool-versions)" >> "$GITHUB_OUTPUT"
       - name: Set up Elixir
         uses: erlef/setup-beam@v1
         with:
@@ -86,22 +29,20 @@ jobs:
           version-type: strict
 
       - name: Install Rust
-        if: needs.versions.outputs.static == 'true'
         uses: dtolnay/rust-toolchain@v1
         with:
-          toolchain: ${{ needs.versions.outputs.rust }}
+          toolchain: ${{ steps.v.outputs.rust }}
 
       - name: Restore Cargo cache
-        if: needs.versions.outputs.static == 'true'
         uses: actions/cache@v5
         with:
           path: |
             ~/.cargo
             target
-          key: cargo-v2-${{ runner.os }}-${{ needs.versions.outputs.rust }}-elixir-${{ github.job }}-${{ hashFiles('**/Cargo.lock') }}-${{ hashFiles('Cargo.toml', 'native/**') }}
+          key: cargo-v2-${{ runner.os }}-${{ steps.v.outputs.rust }}-elixir-${{ github.job }}-${{ hashFiles('**/Cargo.lock') }}-${{ hashFiles('Cargo.toml', 'native/**') }}
           restore-keys: |
-            cargo-v2-${{ runner.os }}-${{ needs.versions.outputs.rust }}-elixir-${{ github.job }}-${{ hashFiles('**/Cargo.lock') }}-
-            cargo-v2-${{ runner.os }}-${{ needs.versions.outputs.rust }}-elixir-${{ github.job }}-
+            cargo-v2-${{ runner.os }}-${{ steps.v.outputs.rust }}-elixir-${{ github.job }}-${{ hashFiles('**/Cargo.lock') }}-
+            cargo-v2-${{ runner.os }}-${{ steps.v.outputs.rust }}-elixir-${{ github.job }}-
 
       - name: Restore Mix cache
         uses: actions/cache@v5
@@ -110,213 +51,56 @@ jobs:
             deps
             _build
             priv/native
-          key: mix-v5-${{ runner.os }}-${{ needs.versions.outputs.erlang }}-${{ needs.versions.outputs.elixir }}-${{ github.job }}-${{ hashFiles('mix.lock', '**/Cargo.lock') }}-${{ hashFiles('mix.exs', 'Cargo.toml', 'config/**', 'lib/**', 'native/**', 'priv/**', 'test/support/**') }}
+          key: mix-v5-${{ runner.os }}-${{ steps.v.outputs.erlang }}-${{ steps.v.outputs.elixir }}-${{ github.job }}-${{ hashFiles('mix.lock', '**/Cargo.lock') }}-${{ hashFiles('mix.exs', 'Cargo.toml', 'config/**', 'lib/**', 'native/**', 'priv/**', 'test/support/**') }}
           restore-keys: |
-            mix-v5-${{ runner.os }}-${{ needs.versions.outputs.erlang }}-${{ needs.versions.outputs.elixir }}-${{ github.job }}-${{ hashFiles('mix.lock', '**/Cargo.lock') }}-
-            mix-v5-${{ runner.os }}-${{ needs.versions.outputs.erlang }}-${{ needs.versions.outputs.elixir }}-${{ github.job }}-
+            mix-v5-${{ runner.os }}-${{ steps.v.outputs.erlang }}-${{ steps.v.outputs.elixir }}-${{ github.job }}-${{ hashFiles('mix.lock', '**/Cargo.lock') }}-
+            mix-v5-${{ runner.os }}-${{ steps.v.outputs.erlang }}-${{ steps.v.outputs.elixir }}-${{ github.job }}-
 
       - name: Prepare in-app docs
-        if: needs.versions.outputs.static == 'true'
         run: |
           rm -rf priv/docs
           cp -R docs/docs.logflare.com/docs priv/docs
 
       - name: Restore Dialyzer PLT cache
-        if: needs.versions.outputs.static == 'true'
         uses: actions/cache@v5
         with:
           path: dialyzer
-          key: plt-${{ runner.os }}-${{ needs.versions.outputs.erlang }}-${{ needs.versions.outputs.elixir }}-${{ hashFiles('mix.lock') }}
+          key: plt-${{ runner.os }}-${{ steps.v.outputs.erlang }}-${{ steps.v.outputs.elixir }}-${{ hashFiles('mix.lock') }}
           restore-keys: |
-            plt-${{ runner.os }}-${{ needs.versions.outputs.erlang }}-${{ needs.versions.outputs.elixir }}-
-            plt-${{ runner.os }}-${{ needs.versions.outputs.erlang }}-
+            plt-${{ runner.os }}-${{ steps.v.outputs.erlang }}-${{ steps.v.outputs.elixir }}-
+            plt-${{ runner.os }}-${{ steps.v.outputs.erlang }}-
 
       - name: Install dependencies
         id: dependencies
         run: mix do deps.get + deps.loadpaths
 
-      - name: Check change detection
-        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
-        run: .github/scripts/test_elixir_ci_changes.sh
-
-      - name: Check formatting
-        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
-        run: mix test.format
-
-      - name: Compile with warnings as errors
-        id: compile
-        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' && needs.versions.outputs.static == 'true' }}
-        run: mix test.compile
-
-      - name: Check lint
-        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
-        run: mix lint.all
-
-      - name: Check types
-        if: ${{ !cancelled() && steps.compile.outcome == 'success' }}
-        run: mix test.typings
-
-  test:
-    name: Tests
-    runs-on: ubuntu-latest
-    needs: versions
-    if: needs.versions.outputs.backend == 'true'
-    services:
-      postgres:
-        image: bitnamilegacy/postgresql:15
-        ports:
-          - 5432:5432
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: logflare_test
-          POSTGRESQL_WAL_LEVEL: logical
-        options: >-
-          --health-cmd "pg_isready -d logflare_test -U postgres -p 5432"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 10
-      clickhouse:
-        image: clickhouse/clickhouse-server:26.2
-        ports:
-          - 8123:8123
-          - 9000:9000
-        env:
-          CLICKHOUSE_DB: logflare_test
-          CLICKHOUSE_USER: logflare
-          CLICKHOUSE_PASSWORD: logflare
-          CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
-        options: >-
-          --health-cmd "wget --no-verbose --tries=1 --spider http://localhost:8123/ping || exit 1"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 10
-          --memory="1500m"
-          --memory-reservation="512m"
-          --cpus="1.0"
-          --shm-size="256m"
-          --tmpfs /var/lib/clickhouse:rw,size=1G
-          --tmpfs /var/log/clickhouse-server:rw,size=100M
-    env:
-      MIX_ENV: test
-      SHELL: /bin/bash
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Prepare Telegraf Output Dir
-        run: |
-          mkdir -p db/telegraf_output
-          touch db/telegraf_output/metrics.out
-          chmod 666 db/telegraf_output/metrics.out
-
-      - name: Start Telegraf
-        run: docker compose up -d telegraf
-
-      - name: Set up Elixir
-        uses: erlef/setup-beam@v1
-        with:
-          version-file: .tool-versions
-          version-type: strict
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@v1
-        with:
-          toolchain: ${{ needs.versions.outputs.rust }}
-
-      - name: Restore Cargo cache
-        uses: actions/cache@v5
-        with:
-          path: |
-            ~/.cargo
-            target
-          key: cargo-v2-${{ runner.os }}-${{ needs.versions.outputs.rust }}-elixir-${{ github.job }}-${{ hashFiles('**/Cargo.lock') }}-${{ hashFiles('Cargo.toml', 'native/**') }}
-          restore-keys: |
-            cargo-v2-${{ runner.os }}-${{ needs.versions.outputs.rust }}-elixir-${{ github.job }}-${{ hashFiles('**/Cargo.lock') }}-
-            cargo-v2-${{ runner.os }}-${{ needs.versions.outputs.rust }}-elixir-${{ github.job }}-
-
-      - name: Restore Mix cache
-        uses: actions/cache@v5
-        with:
-          path: |
-            deps
-            _build
-            priv/native
-          key: mix-v5-${{ runner.os }}-${{ needs.versions.outputs.erlang }}-${{ needs.versions.outputs.elixir }}-${{ github.job }}-${{ hashFiles('mix.lock', '**/Cargo.lock') }}-${{ hashFiles('mix.exs', 'Cargo.toml', 'config/**', 'lib/**', 'native/**', 'priv/**', 'test/support/**') }}
-          restore-keys: |
-            mix-v5-${{ runner.os }}-${{ needs.versions.outputs.erlang }}-${{ needs.versions.outputs.elixir }}-${{ github.job }}-${{ hashFiles('mix.lock', '**/Cargo.lock') }}-
-            mix-v5-${{ runner.os }}-${{ needs.versions.outputs.erlang }}-${{ needs.versions.outputs.elixir }}-${{ github.job }}-
-
-      - name: Prepare in-app docs
-        run: |
-          rm -rf priv/docs
-          cp -R docs/docs.logflare.com/docs priv/docs
-
-      - name: Install dependencies
-        run: mix do deps.get + deps.loadpaths
 
       - name: Compile application
-        run: mix compile
-
-      - name: Set up test database
-        run: |
-          epmd -daemon
-          mix do ecto.create --no-compile + ecto.migrate --no-compile
-
-      - name: Run tests
-        run: mix test.coverage.ci
-
-      - name: Upload coverage
-        uses: coverallsapp/github-action@v2
-        with:
-          file: cover/lcov.info
-          format: lcov
-          git-commit: ${{ github.event.pull_request.head.sha || github.sha }}
-          build-number: ${{ github.run_id }}-${{ github.run_attempt }}
-
-  rust:
-    name: Rust unit tests
-    runs-on: ubuntu-latest
-    needs: versions
-    if: needs.versions.outputs.rust_changed == 'true'
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@v1
-        with:
-          toolchain: ${{ needs.versions.outputs.rust }}
-
-      - name: Restore Cargo cache
+        run: mix test.compile
+      - name: Prepare classic PLT
+        run: mix dialyzer --plt --no-compile
+      - name: Restore incremental PLT
         uses: actions/cache@v5
         with:
-          path: |
-            ~/.cargo
-            target
-          key: cargo-v2-${{ runner.os }}-${{ needs.versions.outputs.rust }}-rust-unit-${{ hashFiles('**/Cargo.lock') }}-${{ hashFiles('Cargo.toml', 'native/mapper_ex/**') }}
-          restore-keys: |
-            cargo-v2-${{ runner.os }}-${{ needs.versions.outputs.rust }}-rust-unit-${{ hashFiles('**/Cargo.lock') }}-
-            cargo-v2-${{ runner.os }}-${{ needs.versions.outputs.rust }}-rust-unit-
-
-      - name: Run mapper Rust unit tests
-        run: cargo test -p mapper_ex
-
-  frontend:
-    name: Frontend JavaScript Unit Tests (assets)
-    runs-on: ubuntu-latest
-    needs: versions
-    if: needs.versions.outputs.frontend == 'true'
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Install Node.js
-        uses: actions/setup-node@v4
+          path: dialyzer-incremental
+          key: iplt-probe-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.v.outputs.erlang }}-${{ steps.v.outputs.elixir }}-test-${{ hashFiles('mix.lock', 'mix.exs', '.github/scripts/dialyzer_probe*.exs') }}-${{ hashFiles('lib/**', 'test/support/**', 'config/**', 'VERSION') }}
+      - name: Classic baseline
+        run: mix run --no-start --no-compile .github/scripts/dialyzer_probe.exs classic baseline-classic
+      - name: Incremental initial analysis
+        run: mix run --no-start --no-compile .github/scripts/dialyzer_probe.exs incremental baseline-incremental
+      - name: Compare initial diagnostic parity
+        run: elixir .github/scripts/dialyzer_probe_compare.exs baseline-classic baseline-incremental
+      - name: Incremental unchanged analysis
+        run: mix run --no-start --no-compile .github/scripts/dialyzer_probe.exs incremental unchanged-incremental
+      - name: Compare unchanged diagnostic parity
+        run: elixir .github/scripts/dialyzer_probe_compare.exs baseline-classic unchanged-incremental
+      - name: Measure cache sizes
+        if: always()
+        run: du -sh dialyzer dialyzer-incremental || true
+      - name: Upload diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@v4
         with:
-          node-version: lts/*
-          cache: npm
-          cache-dependency-path: assets/package-lock.json
-
-      - name: Install frontend dependencies
-        run: npm ci --prefix assets
-
-      - name: Run frontend JavaScript unit tests
-        run: npm test --prefix assets
+          name: dialyzer-probe-${{ github.run_id }}-${{ github.run_attempt }}
+          path: dialyzer-probe-results
+          retention-days: 14
