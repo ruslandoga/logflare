@@ -133,6 +133,15 @@ defmodule Logflare.Backends.ConsolidatedSupTest do
           }
         })
 
+      backend_id = backend.id
+
+      stub(ClickHouseAdaptor, :insert_log_events_compressed, fn %{id: ^backend_id},
+                                                                :log,
+                                                                _compressed,
+                                                                _opts ->
+        :ok
+      end)
+
       sources =
         for i <- 1..10 do
           insert(:source, name: "source_#{i}", user: user, backends: [backend])
