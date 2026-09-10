@@ -6,18 +6,18 @@ defmodule Logflare.Sources.Source.EmailNotificationServerTest do
 
   setup do
     u1 = insert(:user)
-    s1 = insert(:source, user_id: u1.id, notifications_every: 1000)
+    s1 = insert(:source, user_id: u1.id, notifications_every: 10)
     [source: s1, user: u1]
   end
 
   describe "GenServer" do
     test "start_link/1", %{source: source} do
-      {:ok, _pid} = EmailNotificationServer.start_link(source: source)
+      start_supervised!({EmailNotificationServer, source: source})
     end
 
     test "init/1", %{source: source} do
       EmailNotificationServer.init(source: source)
-      TestUtils.retry_assert(fn -> assert_receive :check_rate end)
+      assert_receive :check_rate, 1_000
     end
   end
 end
