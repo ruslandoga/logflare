@@ -406,7 +406,7 @@ defmodule Logflare.UtilsSyncTest do
             constant(%Tesla.Env{headers: headers})
           end),
           bind(headers_gen, fn headers ->
-            bind(keyword_of(random_values), fn opts ->
+            bind(list_of({atom(:alphanumeric), random_values}, max_length: 5), fn opts ->
               constant(%Tesla.Env{opts: opts ++ [req_headers: headers], headers: headers})
             end)
           end),
@@ -472,12 +472,14 @@ defmodule Logflare.UtilsSyncTest do
 
       one_of([
         exception_gen,
-        keyword_of(one_of([struct_gen, exception_gen])),
-        map_of(string(:alphanumeric), one_of([struct_gen, exception_gen])),
-        bind(list_of(struct_gen), fn list -> constant(MapSet.new(list)) end),
-        list_of(struct_gen),
-        list_of(map_of(string(:alphanumeric), struct_gen)),
-        bind(list_of(random_redactables), fn list -> constant(List.to_tuple(list)) end)
+        list_of({atom(:alphanumeric), one_of([struct_gen, exception_gen])}, max_length: 5),
+        map_of(string(:alphanumeric), one_of([struct_gen, exception_gen]), max_length: 5),
+        bind(list_of(struct_gen, max_length: 5), fn list -> constant(MapSet.new(list)) end),
+        list_of(struct_gen, max_length: 5),
+        list_of(map_of(string(:alphanumeric), struct_gen, max_length: 5), max_length: 5),
+        bind(list_of(random_redactables, max_length: 5), fn list ->
+          constant(List.to_tuple(list))
+        end)
       ])
     end
 
@@ -485,6 +487,30 @@ defmodule Logflare.UtilsSyncTest do
       check all to_redact <- redactable_input() do
         refute Logflare.Utils.stringify(to_redact) =~ @secret
         refute inspect(to_redact) =~ @secret
+      end
+    end
+
+    test "redacts sensitive values at the beginning, middle and end of wide containers" do
+      env = %Tesla.Env{headers: [{"authorization", @secret}]}
+
+      for position <- [0, 50, 100] do
+        items = List.insert_at(Enum.to_list(1..100), position, env)
+
+        containers = [
+          items,
+          List.to_tuple(items),
+          Enum.map(items, &{:entry, &1}),
+          Map.new(Enum.with_index(items), fn {item, index} -> {index, item} end),
+          MapSet.new(items),
+          Enum.map(items, &%{entry: &1})
+        ]
+
+        for container <- containers do
+          refute Logflare.Utils.stringify(container) =~ @secret
+          inspected = inspect(container, limit: :infinity, printable_limit: :infinity)
+          refute inspected =~ @secret
+          assert inspected =~ "REDACTED"
+        end
       end
     end
   end
