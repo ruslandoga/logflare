@@ -314,7 +314,6 @@ defmodule Logflare.Backends.Adaptor.OtlpAdaptorTest do
         )
 
       start_supervised!({AdaptorSupervisor, {source, backend}})
-      :timer.sleep(250)
 
       [source: source, backend: backend]
     end
@@ -356,7 +355,6 @@ defmodule Logflare.Backends.Adaptor.OtlpAdaptorTest do
         )
 
       start_supervised!({AdaptorSupervisor, {source, backend}})
-      :timer.sleep(250)
       [source: source, backend: backend]
     end
 
@@ -436,7 +434,6 @@ defmodule Logflare.Backends.Adaptor.OtlpAdaptorTest do
 
     setup %{source: source, backend: backend} do
       start_supervised!({AdaptorSupervisor, {source, backend}})
-      :timer.sleep(250)
       :ok
     end
 
@@ -475,7 +472,6 @@ defmodule Logflare.Backends.Adaptor.OtlpAdaptorTest do
       backend = insert(:backend, type: :otlp, sources: [source], config: @valid_config)
 
       start_supervised!({AdaptorSupervisor, {source, backend}}, id: :service_name_test_adaptor)
-      :timer.sleep(250)
 
       log_event = load_fixture_log_event("storage", source)
       body = capture_request_body(source, log_event, backend)
@@ -499,7 +495,6 @@ defmodule Logflare.Backends.Adaptor.OtlpAdaptorTest do
         )
 
       start_supervised!({AdaptorSupervisor, {source, backend}}, id: :namespace_test_adaptor)
-      :timer.sleep(250)
 
       log_event = load_fixture_log_event("storage", source)
       body = capture_request_body(source, log_event, backend)
@@ -619,7 +614,6 @@ defmodule Logflare.Backends.Adaptor.OtlpAdaptorTest do
       backend = insert(:backend, type: :otlp, sources: [source], config: @valid_config)
 
       start_supervised!({AdaptorSupervisor, {source, backend}}, id: :legacy_shape_test_adaptor)
-      :timer.sleep(250)
 
       log_event = load_fixture_log_event("storage", source)
       body = capture_request_body(source, log_event, backend)
@@ -649,8 +643,6 @@ defmodule Logflare.Backends.Adaptor.OtlpAdaptorTest do
       start_supervised!({AdaptorSupervisor, {source, backend}},
         id: :structured_shape_test_adaptor
       )
-
-      :timer.sleep(250)
 
       log_event = load_fixture_log_event("storage", source)
       body = capture_request_body(source, log_event, backend)
@@ -687,8 +679,6 @@ defmodule Logflare.Backends.Adaptor.OtlpAdaptorTest do
         id: :structured_flatten_test_adaptor
       )
 
-      :timer.sleep(250)
-
       log_event = load_fixture_log_event("edge_log", source)
       body = capture_request_body(source, log_event, backend)
 
@@ -721,8 +711,6 @@ defmodule Logflare.Backends.Adaptor.OtlpAdaptorTest do
       start_supervised!({AdaptorSupervisor, {source, backend}},
         id: :structured_merge_test_adaptor
       )
-
-      :timer.sleep(250)
 
       log_event =
         build(:log_event,
