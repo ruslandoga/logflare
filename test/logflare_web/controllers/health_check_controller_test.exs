@@ -35,14 +35,12 @@ defmodule LogflareWeb.HealthCheckControllerTest do
 
   test "readiness check", %{conn: conn} do
     start_supervised!(Source.Supervisor)
-    :timer.sleep(1000)
 
     assert %{"status" => "ok"} = conn |> get("/ready") |> json_response(200)
   end
 
   test "readiness check while draining", %{conn: conn} do
     start_supervised!(Source.Supervisor)
-    :timer.sleep(1000)
     Readiness.begin_draining()
 
     assert %{"status" => "not_ready"} = conn |> get("/ready") |> json_response(503)
