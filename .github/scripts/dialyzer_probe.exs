@@ -1,8 +1,7 @@
 Code.require_file("dialyzer_probe_runner.exs", __DIR__)
 
 [mode, label] = System.argv()
-{:ok, version} = Application.ensure_all_started(:dialyxir)
-_ = version
+_ = Application.load(:dialyxir)
 unless Application.spec(:dialyxir, :vsn) == ~c"1.4.7", do: raise("Probe requires Dialyxir 1.4.7")
 
 started = System.monotonic_time(:microsecond)
@@ -13,9 +12,11 @@ project_files = Dialyxir.Project.dialyzer_files() |> Enum.sort()
 plt = Dialyxir.Project.plt_file() |> String.to_charlist()
 {:ok, info} = :dialyzer.plt_info(plt)
 plt_files = Keyword.fetch!(info, :files)
+missing_files = Enum.reject(plt_files, &File.regular?/1)
+unless missing_files == [], do: raise("Missing classic PLT inputs: #{inspect(missing_files)}")
 
 files =
-  (Enum.filter(plt_files, &File.regular?/1) ++ project_files)
+  (plt_files ++ project_files)
   |> Map.new(fn file -> {Path.basename(to_string(file)), file} end)
   |> Map.values()
   |> Enum.sort()
@@ -72,5 +73,6 @@ summary = %{
 }
 
 File.write!(output <> ".summary.json", Jason.encode!(summary, pretty: true))
+File.write!(output <> ".summary.etf", :erlang.term_to_binary(summary))
 IO.puts("PROBE_RESULT " <> Jason.encode!(summary))
 System.halt(exit_status)
