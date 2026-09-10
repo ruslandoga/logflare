@@ -48,17 +48,39 @@ jobs:
       quality: ${{ steps.changes.outputs.quality }}
       static: ${{ steps.changes.outputs.static }}
       rust_changed: ${{ steps.changes.outputs.rust }}
+      mix_deps_hash: ${{ steps.v.outputs.mix_deps_hash }}
+      mix_source_hash: ${{ steps.v.outputs.mix_source_hash }}
+      cargo_lock_hash: ${{ steps.v.outputs.cargo_lock_hash }}
+      cargo_source_hash: ${{ steps.v.outputs.cargo_source_hash }}
+      mapper_source_hash: ${{ steps.v.outputs.mapper_source_hash }}
+      plt_lock_hash: ${{ steps.v.outputs.plt_lock_hash }}
+      plt_config_hash: ${{ steps.v.outputs.plt_config_hash }}
     steps:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
-      - name: Read versions from .tool-versions
+      - name: Read versions and cache inputs
         id: v
+        env:
+          MIX_DEPS_HASH: ${{ hashFiles('mix.lock', '**/Cargo.lock') }}
+          MIX_SOURCE_HASH: ${{ hashFiles('mix.exs', 'VERSION', 'Cargo.toml', 'config/**', 'lib/**', 'native/**', 'priv/**', 'test/support/**') }}
+          CARGO_LOCK_HASH: ${{ hashFiles('**/Cargo.lock') }}
+          CARGO_SOURCE_HASH: ${{ hashFiles('Cargo.toml', 'native/**') }}
+          MAPPER_SOURCE_HASH: ${{ hashFiles('Cargo.toml', 'native/mapper_ex/**') }}
+          PLT_LOCK_HASH: ${{ hashFiles('mix.lock') }}
+          PLT_CONFIG_HASH: ${{ hashFiles('mix.exs') }}
         run: |
           echo "elixir=$(grep '^elixir '  .tool-versions | awk '{print $2}')" >> "$GITHUB_OUTPUT"
           echo "erlang=$(grep '^erlang '  .tool-versions | awk '{print $2}')" >> "$GITHUB_OUTPUT"
           echo "rust=$(grep   '^rust '    .tool-versions | awk '{print $2}')" >> "$GITHUB_OUTPUT"
+          echo "mix_deps_hash=$MIX_DEPS_HASH" >> "$GITHUB_OUTPUT"
+          echo "mix_source_hash=$MIX_SOURCE_HASH" >> "$GITHUB_OUTPUT"
+          echo "cargo_lock_hash=$CARGO_LOCK_HASH" >> "$GITHUB_OUTPUT"
+          echo "cargo_source_hash=$CARGO_SOURCE_HASH" >> "$GITHUB_OUTPUT"
+          echo "mapper_source_hash=$MAPPER_SOURCE_HASH" >> "$GITHUB_OUTPUT"
+          echo "plt_lock_hash=$PLT_LOCK_HASH" >> "$GITHUB_OUTPUT"
+          echo "plt_config_hash=$PLT_CONFIG_HASH" >> "$GITHUB_OUTPUT"
 
       - name: Detect affected checks
         id: changes
@@ -98,22 +120,23 @@ jobs:
           path: |
             ~/.cargo
             target
-          key: cargo-v2-${{ runner.os }}-${{ needs.versions.outputs.rust }}-elixir-${{ github.job }}-${{ hashFiles('**/Cargo.lock') }}-${{ hashFiles('Cargo.toml', 'native/**') }}
+          key: cargo-v2-${{ runner.os }}-${{ needs.versions.outputs.rust }}-elixir-${{ github.job }}-${{ needs.versions.outputs.cargo_lock_hash }}-${{ needs.versions.outputs.cargo_source_hash }}
           restore-keys: |
-            cargo-v2-${{ runner.os }}-${{ needs.versions.outputs.rust }}-elixir-${{ github.job }}-${{ hashFiles('**/Cargo.lock') }}-
+            cargo-v2-${{ runner.os }}-${{ needs.versions.outputs.rust }}-elixir-${{ github.job }}-${{ needs.versions.outputs.cargo_lock_hash }}-
             cargo-v2-${{ runner.os }}-${{ needs.versions.outputs.rust }}-elixir-${{ github.job }}-
 
       - name: Restore Mix cache
-        uses: actions/cache@v5
+        id: mix_cache
+        uses: actions/cache/restore@v5
         with:
           path: |
             deps
             _build
             priv/native
-          key: mix-v5-${{ runner.os }}-${{ needs.versions.outputs.erlang }}-${{ needs.versions.outputs.elixir }}-${{ github.job }}-${{ hashFiles('mix.lock', '**/Cargo.lock') }}-${{ hashFiles('mix.exs', 'Cargo.toml', 'config/**', 'lib/**', 'native/**', 'priv/**', 'test/support/**') }}
+          key: mix-v6-${{ runner.os }}-${{ runner.arch }}-${{ needs.versions.outputs.erlang }}-${{ needs.versions.outputs.elixir }}-${{ needs.versions.outputs.rust }}-${{ env.MIX_ENV }}-${{ needs.versions.outputs.mix_deps_hash }}-${{ needs.versions.outputs.mix_source_hash }}
           restore-keys: |
-            mix-v5-${{ runner.os }}-${{ needs.versions.outputs.erlang }}-${{ needs.versions.outputs.elixir }}-${{ github.job }}-${{ hashFiles('mix.lock', '**/Cargo.lock') }}-
-            mix-v5-${{ runner.os }}-${{ needs.versions.outputs.erlang }}-${{ needs.versions.outputs.elixir }}-${{ github.job }}-
+            mix-v6-${{ runner.os }}-${{ runner.arch }}-${{ needs.versions.outputs.erlang }}-${{ needs.versions.outputs.elixir }}-${{ needs.versions.outputs.rust }}-${{ env.MIX_ENV }}-${{ needs.versions.outputs.mix_deps_hash }}-
+            mix-v6-${{ runner.os }}-${{ runner.arch }}-${{ needs.versions.outputs.erlang }}-${{ needs.versions.outputs.elixir }}-${{ needs.versions.outputs.rust }}-${{ env.MIX_ENV }}-
 
       - name: Prepare in-app docs
         if: needs.versions.outputs.static == 'true'
@@ -122,14 +145,16 @@ jobs:
           cp -R docs/docs.logflare.com/docs priv/docs
 
       - name: Restore Dialyzer PLT cache
+        id: plt_cache
         if: needs.versions.outputs.static == 'true'
-        uses: actions/cache@v5
+        uses: actions/cache/restore@v5
         with:
           path: dialyzer
-          key: plt-${{ runner.os }}-${{ needs.versions.outputs.erlang }}-${{ needs.versions.outputs.elixir }}-${{ hashFiles('mix.lock') }}
+          key: plt-v2-${{ runner.os }}-${{ runner.arch }}-${{ needs.versions.outputs.erlang }}-${{ needs.versions.outputs.elixir }}-${{ env.MIX_ENV }}-${{ needs.versions.outputs.plt_lock_hash }}-${{ needs.versions.outputs.plt_config_hash }}
           restore-keys: |
+            plt-v2-${{ runner.os }}-${{ runner.arch }}-${{ needs.versions.outputs.erlang }}-${{ needs.versions.outputs.elixir }}-${{ env.MIX_ENV }}-${{ needs.versions.outputs.plt_lock_hash }}-
+            plt-v2-${{ runner.os }}-${{ runner.arch }}-${{ needs.versions.outputs.erlang }}-${{ needs.versions.outputs.elixir }}-${{ env.MIX_ENV }}-
             plt-${{ runner.os }}-${{ needs.versions.outputs.erlang }}-${{ needs.versions.outputs.elixir }}-
-            plt-${{ runner.os }}-${{ needs.versions.outputs.erlang }}-
 
       - name: Install dependencies
         id: dependencies
@@ -148,13 +173,38 @@ jobs:
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' && needs.versions.outputs.static == 'true' }}
         run: mix test.compile
 
+      - name: Save compiled Mix cache
+        if: ${{ !cancelled() && steps.compile.outcome == 'success' && steps.mix_cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v5
+        with:
+          path: |
+            deps
+            _build
+            priv/native
+          key: ${{ steps.mix_cache.outputs.cache-primary-key }}
+
       - name: Check lint
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: mix lint.all
 
       - name: Check types
+        id: types
         if: ${{ !cancelled() && steps.compile.outcome == 'success' }}
-        run: mix test.typings
+        env:
+          LEGACY_PLT_CACHE: ${{ startsWith(steps.plt_cache.outputs.cache-matched-key, 'plt-') && !startsWith(steps.plt_cache.outputs.cache-matched-key, 'plt-v2-') }}
+        run: |
+          if [[ "$LEGACY_PLT_CACHE" == "true" ]]; then
+            mix test.typings --force-check
+          else
+            mix test.typings
+          fi
+
+      - name: Save Dialyzer PLT cache
+        if: ${{ !cancelled() && steps.types.outcome == 'success' && steps.plt_cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v5
+        with:
+          path: dialyzer
+          key: ${{ steps.plt_cache.outputs.cache-primary-key }}
 
   test:
     name: Tests
@@ -229,22 +279,23 @@ jobs:
           path: |
             ~/.cargo
             target
-          key: cargo-v2-${{ runner.os }}-${{ needs.versions.outputs.rust }}-elixir-${{ github.job }}-${{ hashFiles('**/Cargo.lock') }}-${{ hashFiles('Cargo.toml', 'native/**') }}
+          key: cargo-v2-${{ runner.os }}-${{ needs.versions.outputs.rust }}-elixir-${{ github.job }}-${{ needs.versions.outputs.cargo_lock_hash }}-${{ needs.versions.outputs.cargo_source_hash }}
           restore-keys: |
-            cargo-v2-${{ runner.os }}-${{ needs.versions.outputs.rust }}-elixir-${{ github.job }}-${{ hashFiles('**/Cargo.lock') }}-
+            cargo-v2-${{ runner.os }}-${{ needs.versions.outputs.rust }}-elixir-${{ github.job }}-${{ needs.versions.outputs.cargo_lock_hash }}-
             cargo-v2-${{ runner.os }}-${{ needs.versions.outputs.rust }}-elixir-${{ github.job }}-
 
       - name: Restore Mix cache
-        uses: actions/cache@v5
+        id: mix_cache
+        uses: actions/cache/restore@v5
         with:
           path: |
             deps
             _build
             priv/native
-          key: mix-v5-${{ runner.os }}-${{ needs.versions.outputs.erlang }}-${{ needs.versions.outputs.elixir }}-${{ github.job }}-${{ hashFiles('mix.lock', '**/Cargo.lock') }}-${{ hashFiles('mix.exs', 'Cargo.toml', 'config/**', 'lib/**', 'native/**', 'priv/**', 'test/support/**') }}
+          key: mix-v6-${{ runner.os }}-${{ runner.arch }}-${{ needs.versions.outputs.erlang }}-${{ needs.versions.outputs.elixir }}-${{ needs.versions.outputs.rust }}-${{ env.MIX_ENV }}-${{ needs.versions.outputs.mix_deps_hash }}-${{ needs.versions.outputs.mix_source_hash }}
           restore-keys: |
-            mix-v5-${{ runner.os }}-${{ needs.versions.outputs.erlang }}-${{ needs.versions.outputs.elixir }}-${{ github.job }}-${{ hashFiles('mix.lock', '**/Cargo.lock') }}-
-            mix-v5-${{ runner.os }}-${{ needs.versions.outputs.erlang }}-${{ needs.versions.outputs.elixir }}-${{ github.job }}-
+            mix-v6-${{ runner.os }}-${{ runner.arch }}-${{ needs.versions.outputs.erlang }}-${{ needs.versions.outputs.elixir }}-${{ needs.versions.outputs.rust }}-${{ env.MIX_ENV }}-${{ needs.versions.outputs.mix_deps_hash }}-
+            mix-v6-${{ runner.os }}-${{ runner.arch }}-${{ needs.versions.outputs.erlang }}-${{ needs.versions.outputs.elixir }}-${{ needs.versions.outputs.rust }}-${{ env.MIX_ENV }}-
 
       - name: Prepare in-app docs
         run: |
@@ -255,7 +306,18 @@ jobs:
         run: mix do deps.get + deps.loadpaths
 
       - name: Compile application
+        id: compile
         run: mix compile
+
+      - name: Save compiled Mix cache
+        if: ${{ !cancelled() && steps.compile.outcome == 'success' && steps.mix_cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v5
+        with:
+          path: |
+            deps
+            _build
+            priv/native
+          key: ${{ steps.mix_cache.outputs.cache-primary-key }}
 
       - name: Set up test database
         run: |
@@ -292,9 +354,9 @@ jobs:
           path: |
             ~/.cargo
             target
-          key: cargo-v2-${{ runner.os }}-${{ needs.versions.outputs.rust }}-rust-unit-${{ hashFiles('**/Cargo.lock') }}-${{ hashFiles('Cargo.toml', 'native/mapper_ex/**') }}
+          key: cargo-v2-${{ runner.os }}-${{ needs.versions.outputs.rust }}-rust-unit-${{ needs.versions.outputs.cargo_lock_hash }}-${{ needs.versions.outputs.mapper_source_hash }}
           restore-keys: |
-            cargo-v2-${{ runner.os }}-${{ needs.versions.outputs.rust }}-rust-unit-${{ hashFiles('**/Cargo.lock') }}-
+            cargo-v2-${{ runner.os }}-${{ needs.versions.outputs.rust }}-rust-unit-${{ needs.versions.outputs.cargo_lock_hash }}-
             cargo-v2-${{ runner.os }}-${{ needs.versions.outputs.rust }}-rust-unit-
 
       - name: Run mapper Rust unit tests
