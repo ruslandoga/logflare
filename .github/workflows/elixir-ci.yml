@@ -159,7 +159,7 @@ jobs:
           cp -R docs/docs.logflare.com/docs priv/docs
 
       - name: Install dependencies
-        run: mix do deps.get + deps.compile
+        run: mix do deps.get + deps.loadpaths
 
       - name: Run ${{ matrix.commands.name }}
         run: ${{ matrix.commands.run }}
@@ -215,7 +215,7 @@ jobs:
           cp -R docs/docs.logflare.com/docs priv/docs
 
       - name: Install dependencies
-        run: mix do deps.get + deps.compile
+        run: mix do deps.get + deps.loadpaths
 
       - name: Run compilation checks
         run: mix test.compile
@@ -280,7 +280,7 @@ jobs:
             plt-${{ runner.os }}-${{ needs.versions.outputs.erlang }}-
 
       - name: Install dependencies
-        run: mix do deps.get + deps.compile
+        run: mix do deps.get + deps.loadpaths
 
       - name: Run typing checks
         run: mix test.typings
@@ -381,7 +381,7 @@ jobs:
           cp -R docs/docs.logflare.com/docs priv/docs
 
       - name: Install dependencies
-        run: mix do deps.get + deps.compile
+        run: mix do deps.get + deps.loadpaths
 
       - name: Set up test database
         run: |
