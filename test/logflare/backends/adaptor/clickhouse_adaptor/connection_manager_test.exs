@@ -4,8 +4,7 @@ defmodule Logflare.Backends.Adaptor.ClickHouseAdaptor.ConnectionManagerTest do
   alias Logflare.Backends.Adaptor.ClickHouseAdaptor
   alias Logflare.Backends.Adaptor.ClickHouseAdaptor.ConnectionManager
 
-  @resolve_interval :timer.seconds(1)
-  @timeout_interval @resolve_interval * 2
+  @resolve_interval :timer.minutes(1)
 
   setup do
     insert(:plan, name: "Free")
@@ -107,21 +106,23 @@ defmodule Logflare.Backends.Adaptor.ClickHouseAdaptor.ConnectionManagerTest do
   describe "connection pool lifecycle resolution" do
     setup context do
       config = Application.get_env(:logflare, ConnectionManager)
-      Application.put_env(:logflare, ConnectionManager, resolve_interval: @resolve_interval)
 
-      {:ok, _manager_pid} = ConnectionManager.start_link(context.backend)
+      Application.put_env(:logflare, ConnectionManager,
+        resolve_interval: Map.get(context, :resolve_interval, @resolve_interval)
+      )
+
+      manager_pid = start_supervised!({ConnectionManager, context.backend})
 
       on_exit(fn -> Application.put_env(:logflare, ConnectionManager, config) end)
 
-      context
+      Map.put(context, :manager_pid, manager_pid)
     end
 
     test "updates activity timestamp when notified", %{backend: backend} do
       assert :ok == ConnectionManager.ensure_pool_started(backend)
 
-      activity_before = ConnectionManager.get_last_activity(backend)
-
-      Process.sleep(@timeout_interval)
+      activity_before = System.system_time(:millisecond) - :timer.seconds(1)
+      assert :ok == ConnectionManager.set_last_activity(backend, activity_before)
 
       assert :ok == ConnectionManager.notify_activity(backend)
 
@@ -130,28 +131,42 @@ defmodule Logflare.Backends.Adaptor.ClickHouseAdaptor.ConnectionManagerTest do
       assert ConnectionManager.pool_active?(backend)
     end
 
-    test "initializes activity timestamp on resolve when not previously set", %{backend: backend} do
+    test "initializes activity timestamp on resolve when not previously set", %{
+      backend: backend,
+      manager_pid: manager_pid
+    } do
       assert :ok == ConnectionManager.ensure_pool_started(backend)
       assert ConnectionManager.pool_active?(backend)
 
       assert :ok == ConnectionManager.set_last_activity(backend, nil)
 
-      Process.sleep(@timeout_interval)
+      timer_before = :sys.get_state(manager_pid).resolve_timer_ref
+      TestUtils.send_and_wait_for_handling(manager_pid, :resolve_connections)
+      timer_after = :sys.get_state(manager_pid).resolve_timer_ref
 
+      assert timer_after != timer_before
+      assert Process.read_timer(timer_before) == false
+      assert is_integer(Process.read_timer(timer_after))
       assert is_integer(ConnectionManager.get_last_activity(backend))
       assert ConnectionManager.pool_active?(backend)
     end
 
-    test "stops pool after exceeding inactivity timeout", %{backend: backend} do
+    @tag resolve_interval: 10
+    test "the scheduled resolve loop stops the pool after exceeding inactivity timeout", %{
+      backend: backend
+    } do
       assert :ok == ConnectionManager.ensure_pool_started(backend)
       assert ConnectionManager.pool_active?(backend)
 
+      pool_pid = ConnectionManager.get_pool_pid(backend)
+      monitor_ref = Process.monitor(pool_pid)
       old_timestamp = System.system_time(:millisecond) - :timer.minutes(10)
       assert :ok == ConnectionManager.set_last_activity(backend, old_timestamp)
 
-      Process.sleep(@timeout_interval)
+      assert_receive {:DOWN, ^monitor_ref, :process, ^pool_pid, :normal}, 1_000
 
       refute ConnectionManager.pool_active?(backend)
+      assert ConnectionManager.get_pool_pid(backend) == nil
     end
   end
 
@@ -161,14 +176,14 @@ defmodule Logflare.Backends.Adaptor.ClickHouseAdaptor.ConnectionManagerTest do
 
       Application.put_env(:logflare, ConnectionManager,
         resolve_interval: @resolve_interval,
-        recycle_interval: 1
+        recycle_interval: :timer.minutes(1)
       )
 
       on_exit(fn -> Application.put_env(:logflare, ConnectionManager, config) end)
 
-      {:ok, _manager_pid} = ConnectionManager.start_link(context.backend)
+      manager_pid = start_supervised!({ConnectionManager, context.backend})
 
-      context
+      Map.put(context, :manager_pid, manager_pid)
     end
 
     test "`recycle_pool` returns an error when no pool is running", %{backend: backend} do
@@ -176,16 +191,18 @@ defmodule Logflare.Backends.Adaptor.ClickHouseAdaptor.ConnectionManagerTest do
       assert {:error, :no_pool} == ConnectionManager.recycle_pool(backend)
     end
 
-    test "`recycle_pool` recycles connections without restarting the pool", %{backend: backend} do
+    test "`recycle_pool` recycles connections without restarting the pool", %{
+      backend: backend,
+      manager_pid: manager_pid
+    } do
       assert :ok == ConnectionManager.ensure_pool_started(backend)
 
       pool_pid = ConnectionManager.get_pool_pid(backend)
-      scheduled_at = ConnectionManager.get_next_recycle_at(backend)
-
       assert is_pid(pool_pid)
-      assert is_integer(scheduled_at)
+      assert is_integer(ConnectionManager.get_next_recycle_at(backend))
 
-      Process.sleep(10)
+      scheduled_at = System.system_time(:millisecond) - 1
+      :sys.replace_state(manager_pid, &%{&1 | next_recycle_at: scheduled_at})
 
       assert :ok == ConnectionManager.recycle_pool(backend)
 
@@ -195,15 +212,17 @@ defmodule Logflare.Backends.Adaptor.ClickHouseAdaptor.ConnectionManagerTest do
       assert ConnectionManager.pool_active?(backend)
     end
 
-    test "the resolve loop recycles the pool once the recycle interval elapses", %{
-      backend: backend
+    test "the resolve loop recycles the pool once the recycle deadline has elapsed", %{
+      backend: backend,
+      manager_pid: manager_pid
     } do
       assert :ok == ConnectionManager.ensure_pool_started(backend)
 
       pool_pid = ConnectionManager.get_pool_pid(backend)
-      scheduled_at = ConnectionManager.get_next_recycle_at(backend)
+      scheduled_at = System.system_time(:millisecond) - 1
+      :sys.replace_state(manager_pid, &%{&1 | next_recycle_at: scheduled_at})
 
-      Process.sleep(@timeout_interval)
+      TestUtils.send_and_wait_for_handling(manager_pid, :resolve_connections)
 
       assert ConnectionManager.get_pool_pid(backend) == pool_pid
       assert ConnectionManager.get_next_recycle_at(backend) > scheduled_at
