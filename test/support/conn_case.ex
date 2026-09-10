@@ -7,10 +7,12 @@ defmodule LogflareWeb.ConnCase do
   import other functionality to make it easier
   to build common datastructures and query the data layer.
 
-  Finally, if the test case interacts with the database,
-  it cannot be async. For this reason, every test runs
-  inside a transaction which is reset at the beginning
-  of the test unless the test case is marked as async.
+  Every test runs inside a sandbox transaction. Async tests use private
+  transactions and must explicitly allow background processes to access them.
+
+  `isolated: true` bypasses context caching and skips global resource cleanup.
+  Use it for tests that manage their own background processes and do not create
+  ingestion queues, rate entries, or ClickHouse connection managers.
 
   The HTTP request helpers imported from this module (`get/3`, `post/3`, and
   the other verbs) dispatch through `dispatch_and_assert_open_api_response/5`.
@@ -38,7 +40,7 @@ defmodule LogflareWeb.ConnCase do
   @conn_test_request_macros for method <- @http_methods, arity <- [2, 3], do: {method, arity}
   @open_api_methods Map.new(@http_methods, &{&1 |> Atom.to_string() |> String.upcase(), &1})
 
-  using _opts do
+  using opts do
     quote do
       use Mimic
 
@@ -75,14 +77,18 @@ defmodule LogflareWeb.ConnCase do
           func.()
         end)
 
-        caches = Logflare.ContextCache.Supervisor.list_caches()
-        Enum.each(caches, &Cachex.reset(&1, hooks: [Cachex.Stats]))
+        if unquote(Keyword.get(opts, :isolated, false)) do
+          stub(Logflare.ContextCache, :fetch, fn _cache, _key, getter -> getter.() end)
+        else
+          caches = Logflare.ContextCache.Supervisor.list_caches()
+          Enum.each(caches, &Cachex.reset(&1, hooks: [Cachex.Stats]))
 
-        on_exit(fn ->
-          IngestEventQueue.delete_all_mappings()
-          PubSubRates.Cache.clear()
-          ClickHouseAdaptor.QueryConnectionSup.terminate_all()
-        end)
+          on_exit(fn ->
+            IngestEventQueue.delete_all_mappings()
+            PubSubRates.Cache.clear()
+            ClickHouseAdaptor.QueryConnectionSup.terminate_all()
+          end)
+        end
 
         :ok
       end
