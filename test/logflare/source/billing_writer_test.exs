@@ -33,8 +33,7 @@ defmodule Logflare.Sources.Source.BillingWriterTest do
   test ":write_count", %{pid: pid, source: source} do
     # increase log count
     Counters.increment(source.token)
-    send(pid, :write_count)
-    :timer.sleep(200)
+    TestUtils.send_and_wait_for_handling(pid, :write_count)
     assert Repo.aggregate(BillingCount, :count) == 1
   end
 end
