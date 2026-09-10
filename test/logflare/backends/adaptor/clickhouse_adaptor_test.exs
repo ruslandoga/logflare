@@ -1423,7 +1423,27 @@ defmodule Logflare.Backends.Adaptor.ClickHouseAdaptorTest do
         )
 
       start_supervised!({ClickHouseAdaptor, backend})
-      assert {:error, _} = ClickHouseAdaptor.test_connection(backend)
+
+      stub(Ch, :start_link, fn opts ->
+        opts =
+          if opts[:hostname] == "localhost" and opts[:port] == 19_999 and
+               not Keyword.has_key?(opts, :name) do
+            Keyword.merge(opts, queue_target: 10, queue_interval: 100)
+          else
+            opts
+          end
+
+        Mimic.call_original(Ch, :start_link, [opts])
+      end)
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:error, :grant_check_unknown_failure} =
+                   ClickHouseAdaptor.test_connection(backend)
+        end)
+
+      assert log =~ "async insert cluster GRANT check failed"
+      assert log =~ "(Mint.TransportError) connection refused"
     end
 
     test "skips the async check when async is disabled even if the cluster URL is unreachable" do
@@ -1520,6 +1540,17 @@ defmodule Logflare.Backends.Adaptor.ClickHouseAdaptorTest do
           config: %{query_user: "ch_reader", query_password: "reader_pa55"},
           cleanup?: false
         )
+
+      stub(Ch, :start_link, fn opts ->
+        opts =
+          if opts[:username] == "ch_reader" and not Keyword.has_key?(opts, :name) do
+            Keyword.merge(opts, queue_target: 10, queue_interval: 100)
+          else
+            opts
+          end
+
+        Mimic.call_original(Ch, :start_link, [opts])
+      end)
 
       log =
         ExUnit.CaptureLog.capture_log(fn ->

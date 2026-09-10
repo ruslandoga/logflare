@@ -268,9 +268,28 @@ defmodule Logflare.Backends.Adaptor.ClickHouseAdaptor.ConnectionManagerTest do
     test "handles invalid database configuration", %{invalid_backend: invalid_backend} do
       _manager_pid = start_supervised!({ConnectionManager, invalid_backend})
 
+      stub(Ch, :start_link, fn opts ->
+        opts =
+          if opts[:hostname] == "localhost" and opts[:port] == 19_999 and
+               not Keyword.has_key?(opts, :name) do
+            Keyword.merge(opts, queue_target: 10, queue_interval: 100)
+          else
+            opts
+          end
+
+        Mimic.call_original(Ch, :start_link, [opts])
+      end)
+
       case ConnectionManager.ensure_pool_started(invalid_backend) do
         :ok ->
-          assert {:error, _reason} = ClickHouseAdaptor.test_connection(invalid_backend)
+          log =
+            ExUnit.CaptureLog.capture_log(fn ->
+              assert {:error, :grant_check_unknown_failure} =
+                       ClickHouseAdaptor.test_connection(invalid_backend)
+            end)
+
+          assert log =~ "ingest cluster"
+          assert log =~ "(Mint.TransportError) connection refused"
 
         {:error, _reason} ->
           refute ConnectionManager.pool_active?(invalid_backend)
