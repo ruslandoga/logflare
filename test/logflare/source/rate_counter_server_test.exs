@@ -24,8 +24,10 @@ defmodule Logflare.Sources.Source.RateCounterServerTest do
     test "can start process without calling Goth" do
       user = insert(:user)
       source = insert(:source, user: user)
-      start_link_supervised!({RateCounterServer, source: source})
-      :timer.sleep(500)
+      reject(Goth, :fetch, 1)
+      pid = start_link_supervised!({RateCounterServer, source: source})
+      assert :sys.get_state(pid) == source.token
+      assert {:ok, 0} = RateCounterServer.get_insert_count(source.token)
     end
   end
 end
