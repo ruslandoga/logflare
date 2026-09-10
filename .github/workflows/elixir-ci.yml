@@ -138,6 +138,22 @@ jobs:
             mix-v6-${{ runner.os }}-${{ runner.arch }}-${{ needs.versions.outputs.erlang }}-${{ needs.versions.outputs.elixir }}-${{ needs.versions.outputs.rust }}-${{ env.MIX_ENV }}-${{ needs.versions.outputs.mix_deps_hash }}-
             mix-v6-${{ runner.os }}-${{ runner.arch }}-${{ needs.versions.outputs.erlang }}-${{ needs.versions.outputs.elixir }}-${{ needs.versions.outputs.rust }}-${{ env.MIX_ENV }}-
 
+      # Seed v6 from the verified main build while main still publishes v5 caches.
+      - name: Restore compatible legacy Mix cache
+        if: >-
+          steps.mix_cache.outputs.cache-matched-key == '' &&
+          runner.os == 'Linux' && runner.arch == 'X64' && env.MIX_ENV == 'test' &&
+          needs.versions.outputs.erlang == '27.3.4.6' &&
+          needs.versions.outputs.elixir == '1.19.5-otp-27' &&
+          needs.versions.outputs.rust == '1.96.0'
+        uses: actions/cache/restore@v5
+        with:
+          path: |
+            deps
+            _build
+            priv/native
+          key: mix-v5-Linux-27.3.4.6-1.19.5-otp-27-compile-9a6949383b1e545017858bd4dc2194eed1da26cb845044dc091c72d0099cd9db-dfcedfe5946a1f01fa3eb6b59df3d657b90b908529d661c3443d2925aaebb6f9
+
       - name: Prepare in-app docs
         if: needs.versions.outputs.static == 'true'
         run: |
@@ -296,6 +312,22 @@ jobs:
           restore-keys: |
             mix-v6-${{ runner.os }}-${{ runner.arch }}-${{ needs.versions.outputs.erlang }}-${{ needs.versions.outputs.elixir }}-${{ needs.versions.outputs.rust }}-${{ env.MIX_ENV }}-${{ needs.versions.outputs.mix_deps_hash }}-
             mix-v6-${{ runner.os }}-${{ runner.arch }}-${{ needs.versions.outputs.erlang }}-${{ needs.versions.outputs.elixir }}-${{ needs.versions.outputs.rust }}-${{ env.MIX_ENV }}-
+
+      # Seed v6 from the verified main build while main still publishes v5 caches.
+      - name: Restore compatible legacy Mix cache
+        if: >-
+          steps.mix_cache.outputs.cache-matched-key == '' &&
+          runner.os == 'Linux' && runner.arch == 'X64' && env.MIX_ENV == 'test' &&
+          needs.versions.outputs.erlang == '27.3.4.6' &&
+          needs.versions.outputs.elixir == '1.19.5-otp-27' &&
+          needs.versions.outputs.rust == '1.96.0'
+        uses: actions/cache/restore@v5
+        with:
+          path: |
+            deps
+            _build
+            priv/native
+          key: mix-v5-Linux-27.3.4.6-1.19.5-otp-27-compile-9a6949383b1e545017858bd4dc2194eed1da26cb845044dc091c72d0099cd9db-dfcedfe5946a1f01fa3eb6b59df3d657b90b908529d661c3443d2925aaebb6f9
 
       - name: Prepare in-app docs
         run: |
