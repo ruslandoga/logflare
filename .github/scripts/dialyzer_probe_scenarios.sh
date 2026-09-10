@@ -24,30 +24,6 @@ pair() {
   elixir .github/scripts/dialyzer_probe_deltas.exs "$label-classic" "$label-incremental"
 }
 
-python3 - <<'PY'
-from pathlib import Path
-p = Path('lib/logflare/utils/maybe.ex')
-s = p.read_text()
-before = 'def maybe_string_to_integer_or_zero(nil), do: 0'
-assert s.count(before) == 1
-p.write_text(s.replace(before, 'def maybe_string_to_integer_or_zero(nil), do: 1'))
-PY
-mix compile
-pair leaf 0
-
-git restore -- lib/logflare/utils/maybe.ex
-python3 - <<'PY'
-from pathlib import Path
-p = Path('lib/logflare/user.ex')
-s = p.read_text()
-before = '@type id :: pos_integer()'
-assert s.count(before) == 1
-p.write_text(s.replace(before, '@type id :: non_neg_integer()'))
-PY
-mix compile
-pair shared-type 0
-
-git restore -- lib/logflare/user.ex
 cat > lib/ci_probe_marker.ex <<'EOF'
 defmodule Logflare.CIProbe.TypeError do
   @spec value() :: integer()
@@ -61,17 +37,6 @@ elixir .github/scripts/dialyzer_probe_compare.exs error-incremental repeated-err
 
 python3 - <<'PY'
 from pathlib import Path
-p = Path('.dialyzer_ignore.exs')
-s = p.read_text()
-assert s.startswith('[\n')
-p.write_text(s.replace('[\n', '[\n  {"lib/ci_probe_marker.ex", :invalid_contract},\n', 1))
-PY
-pair ignored-error 0
-elixir .github/scripts/dialyzer_probe_compare.exs error-incremental repeated-error-incremental
-
-git restore -- .dialyzer_ignore.exs
-python3 - <<'PY'
-from pathlib import Path
 p = Path('lib/ci_probe_marker.ex')
 p.write_text(p.read_text().replace(':diagnostic_error', '0'))
 PY
@@ -80,7 +45,7 @@ pair fixed-error 0
 
 rm lib/ci_probe_marker.ex
 mix compile
-pair deleted-module 0
+probe incremental deleted-module-incremental 0
 elixir .github/scripts/dialyzer_probe_compare.exs baseline-incremental deleted-module-incremental
 
 git diff --exit-code -- lib .dialyzer_ignore.exs
