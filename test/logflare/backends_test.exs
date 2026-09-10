@@ -1141,24 +1141,42 @@ defmodule Logflare.BackendsTest do
 
     test "emits telemetry events for backend ingestion", %{source: source} do
       user = source.user_id |> then(&Repo.get(User, &1))
-      backend = insert(:backend, user: user, type: :postgres)
-      source = Sources.preload_backends(source)
-      {:ok, source} = Backends.update_source_backends(source, [backend])
 
-      TestUtils.attach_forwarder([:logflare, :backends, :ingest, :dispatch])
+      config =
+        Repo.config()
+        |> Keyword.take([:username, :password, :hostname, :port, :database])
+        |> Map.new()
 
-      log_count = 119
+      backend = insert(:backend, user: user, type: :postgres, config: config, sources: [source])
+      Backends.clear_list_backends_cache(source.id)
 
-      events = for _n <- 1..log_count, do: build(:log_event, source: source)
-      assert {:ok, ^log_count} = Backends.ingest_logs(events, source)
+      table_key = {source.id, backend.id, nil}
+      {:ok, _tid} = IngestEventQueue.upsert_tid(table_key)
 
-      # for specific backend
-      assert_receive {:telemetry_event, [:logflare, :backends, :ingest, :dispatch],
-                      %{count: ^log_count}, %{backend_type: :postgres}}
+      try do
+        TestUtils.attach_forwarder([:logflare, :backends, :ingest, :dispatch])
 
-      # for system default
-      assert_receive {:telemetry_event, [:logflare, :backends, :ingest, :dispatch],
-                      %{count: ^log_count}, %{backend_type: :bigquery}}
+        log_count = 119
+
+        events = for _n <- 1..log_count, do: build(:log_event, source: source)
+        assert {:ok, ^log_count} = Backends.ingest_logs(events, source)
+
+        assert_receive {:telemetry_event, [:logflare, :backends, :ingest, :dispatch],
+                        %{count: ^log_count}, %{backend_type: :postgres}}
+
+        assert_receive {:telemetry_event, [:logflare, :backends, :ingest, :dispatch],
+                        %{count: ^log_count}, %{backend_type: :bigquery}}
+
+        assert IngestEventQueue.get_table_size(table_key) == log_count
+
+        assert {:ok, queued_events} =
+                 IngestEventQueue.fetch_events({source.id, backend.id}, log_count)
+
+        assert MapSet.new(queued_events, & &1.id) == MapSet.new(events, & &1.id)
+      after
+        IngestEventQueue.delete_queue(table_key)
+        IngestEventQueue.prune_generations({source.id, backend.id})
+      end
     end
   end
 
