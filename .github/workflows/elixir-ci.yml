@@ -117,58 +117,11 @@ jobs:
           echo "quality=$quality" >> "$GITHUB_OUTPUT"
           echo "rust=$rust" >> "$GITHUB_OUTPUT"
 
-  quality:
-    name: Checks (${{ matrix.commands.name }}, ${{ matrix.commands.run }})
+  typing:
+    name: Static checks
     runs-on: ubuntu-latest
     needs: versions
     if: needs.versions.outputs.quality == 'true'
-    strategy:
-      matrix:
-        commands:
-          - name: Code Quality - Linting
-            run: mix lint.all
-          - name: Code Quality - Formatting
-            run: mix test.format
-    env:
-      MIX_ENV: test
-      SHELL: /bin/bash
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Set up Elixir
-        uses: erlef/setup-beam@v1
-        with:
-          version-file: .tool-versions
-          version-type: strict
-
-      - name: Restore Mix cache
-        uses: actions/cache@v5
-        with:
-          path: |
-            deps
-            _build
-            priv/native
-          key: mix-v5-${{ runner.os }}-${{ needs.versions.outputs.erlang }}-${{ needs.versions.outputs.elixir }}-${{ github.job }}-${{ hashFiles('mix.lock', '**/Cargo.lock') }}-${{ hashFiles('mix.exs', 'Cargo.toml', 'config/**', 'lib/**', 'native/**', 'priv/**', 'test/support/**') }}
-          restore-keys: |
-            mix-v5-${{ runner.os }}-${{ needs.versions.outputs.erlang }}-${{ needs.versions.outputs.elixir }}-${{ github.job }}-${{ hashFiles('mix.lock', '**/Cargo.lock') }}-
-            mix-v5-${{ runner.os }}-${{ needs.versions.outputs.erlang }}-${{ needs.versions.outputs.elixir }}-${{ github.job }}-
-
-      - name: Prepare in-app docs
-        run: |
-          rm -rf priv/docs
-          cp -R docs/docs.logflare.com/docs priv/docs
-
-      - name: Install dependencies
-        run: mix do deps.get + deps.loadpaths
-
-      - name: Run ${{ matrix.commands.name }}
-        run: ${{ matrix.commands.run }}
-
-  compile:
-    name: Checks (Compilation Warnings, mix test.compile)
-    runs-on: ubuntu-latest
-    needs: versions
-    if: needs.versions.outputs.backend == 'true'
     env:
       MIX_ENV: test
       SHELL: /bin/bash
@@ -182,11 +135,13 @@ jobs:
           version-type: strict
 
       - name: Install Rust
+        if: needs.versions.outputs.backend == 'true'
         uses: dtolnay/rust-toolchain@v1
         with:
           toolchain: ${{ needs.versions.outputs.rust }}
 
       - name: Restore Cargo cache
+        if: needs.versions.outputs.backend == 'true'
         uses: actions/cache@v5
         with:
           path: |
@@ -210,67 +165,13 @@ jobs:
             mix-v5-${{ runner.os }}-${{ needs.versions.outputs.erlang }}-${{ needs.versions.outputs.elixir }}-${{ github.job }}-
 
       - name: Prepare in-app docs
-        run: |
-          rm -rf priv/docs
-          cp -R docs/docs.logflare.com/docs priv/docs
-
-      - name: Install dependencies
-        run: mix do deps.get + deps.loadpaths
-
-      - name: Run compilation checks
-        run: mix test.compile
-
-  typing:
-    name: Checks (Typing check, mix test.typings)
-    runs-on: ubuntu-latest
-    needs: versions
-    if: needs.versions.outputs.backend == 'true'
-    env:
-      MIX_ENV: test
-      SHELL: /bin/bash
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Set up Elixir
-        uses: erlef/setup-beam@v1
-        with:
-          version-file: .tool-versions
-          version-type: strict
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@v1
-        with:
-          toolchain: ${{ needs.versions.outputs.rust }}
-
-      - name: Restore Cargo cache
-        uses: actions/cache@v5
-        with:
-          path: |
-            ~/.cargo
-            target
-          key: cargo-v2-${{ runner.os }}-${{ needs.versions.outputs.rust }}-elixir-${{ github.job }}-${{ hashFiles('**/Cargo.lock') }}-${{ hashFiles('Cargo.toml', 'native/**') }}
-          restore-keys: |
-            cargo-v2-${{ runner.os }}-${{ needs.versions.outputs.rust }}-elixir-${{ github.job }}-${{ hashFiles('**/Cargo.lock') }}-
-            cargo-v2-${{ runner.os }}-${{ needs.versions.outputs.rust }}-elixir-${{ github.job }}-
-
-      - name: Restore Mix cache
-        uses: actions/cache@v5
-        with:
-          path: |
-            deps
-            _build
-            priv/native
-          key: mix-v5-${{ runner.os }}-${{ needs.versions.outputs.erlang }}-${{ needs.versions.outputs.elixir }}-${{ github.job }}-${{ hashFiles('mix.lock', '**/Cargo.lock') }}-${{ hashFiles('mix.exs', 'Cargo.toml', 'config/**', 'lib/**', 'native/**', 'priv/**', 'test/support/**') }}
-          restore-keys: |
-            mix-v5-${{ runner.os }}-${{ needs.versions.outputs.erlang }}-${{ needs.versions.outputs.elixir }}-${{ github.job }}-${{ hashFiles('mix.lock', '**/Cargo.lock') }}-
-            mix-v5-${{ runner.os }}-${{ needs.versions.outputs.erlang }}-${{ needs.versions.outputs.elixir }}-${{ github.job }}-
-
-      - name: Prepare in-app docs
+        if: needs.versions.outputs.backend == 'true'
         run: |
           rm -rf priv/docs
           cp -R docs/docs.logflare.com/docs priv/docs
 
       - name: Restore Dialyzer PLT cache
+        if: needs.versions.outputs.backend == 'true'
         uses: actions/cache@v5
         with:
           path: dialyzer
@@ -280,13 +181,28 @@ jobs:
             plt-${{ runner.os }}-${{ needs.versions.outputs.erlang }}-
 
       - name: Install dependencies
+        id: dependencies
         run: mix do deps.get + deps.loadpaths
 
-      - name: Run typing checks
+      - name: Check formatting
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: mix test.format
+
+      - name: Compile with warnings as errors
+        id: compile
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' && needs.versions.outputs.backend == 'true' }}
+        run: mix test.compile
+
+      - name: Check lint
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: mix lint.all
+
+      - name: Check types
+        if: ${{ !cancelled() && steps.compile.outcome == 'success' }}
         run: mix test.typings
 
   test:
-    name: Checks (Tests, epmd -daemon; mix do ecto.create + ecto.migrate + test.coverage.ci)
+    name: Tests
     runs-on: ubuntu-latest
     needs: versions
     if: needs.versions.outputs.backend == 'true'
