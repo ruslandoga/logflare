@@ -391,7 +391,7 @@ jobs:
       - name: Run tests
         env:
           LOGFLARE_TEST_TIMINGS_PATH: ${{ runner.temp }}/elixir-test-timings.json
-        run: mix test.coverage.ci --formatter Logflare.CITimingFormatter --seed 662786
+        run: mix test --formatter Logflare.CITimingFormatter --seed 662786
 
       - name: Upload test timings
         if: always()
@@ -400,13 +400,6 @@ jobs:
           name: elixir-test-timings
           path: ${{ runner.temp }}/elixir-test-timings.json
 
-      - name: Upload coverage
-        uses: coverallsapp/github-action@v2
-        with:
-          file: cover/lcov.info
-          format: lcov
-          git-commit: ${{ github.event.pull_request.head.sha || github.sha }}
-          build-number: ${{ github.run_id }}-${{ github.run_attempt }}
 
   rust:
     name: Rust unit tests
