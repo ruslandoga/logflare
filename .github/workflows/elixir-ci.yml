@@ -10,6 +10,14 @@ on:
         description: Restore the original IPLT and compare one warm analysis to its artifact
         type: boolean
         default: false
+      retention_only:
+        description: Finish the existing cached-error/repeat/fix scenario without classic reruns
+        type: boolean
+        default: false
+      reference_iplt_key:
+        description: Exact original IPLT cache key corresponding to the reference artifact
+        type: string
+        default: 'iplt-probe-v1-Linux-X64-27.3.4.6-1.19.5-otp-27-test-f6feff6c0a7b932db9ad61f6d97fd0466e32b3843765ca3c1ca061d50b6a7026-876d9b208f8feffce3ef7e56266f68c943987dc0f6e724f1428dd62a66766ea9'
       reference_run:
         description: Prior diagnostic run containing the original incremental baseline
         type: string
@@ -22,7 +30,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   typing:
-    name: ${{ inputs.warm_only && 'Restored incremental Dialyzer' || 'Classic versus incremental Dialyzer' }}
+    name: ${{ inputs.warm_only && 'Restored incremental Dialyzer' || inputs.retention_only && 'Incremental warning retention' || 'Classic versus incremental Dialyzer' }}
     runs-on: ubuntu-latest
     timeout-minutes: 50
     env:
@@ -30,6 +38,9 @@ jobs:
       SHELL: /bin/bash
     steps:
       - uses: actions/checkout@v6
+      - name: Validate diagnostic mode
+        if: ${{ inputs.warm_only && inputs.retention_only }}
+        run: exit 1
       - name: Read versions
         id: v
         run: |
@@ -103,15 +114,16 @@ jobs:
             priv/native
           key: ${{ steps.mix-cache.outputs.cache-primary-key }}
       - name: Prepare classic PLT
-        if: ${{ !inputs.warm_only }}
+        if: ${{ !inputs.warm_only && !inputs.retention_only }}
         run: mix dialyzer --plt --no-compile
       - name: Save prepared classic PLT
-        if: ${{ !inputs.warm_only && steps.plt-cache.outputs.cache-hit != 'true' }}
+        if: ${{ !inputs.warm_only && !inputs.retention_only && steps.plt-cache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@v5
         with:
           path: dialyzer
           key: ${{ steps.plt-cache.outputs.cache-primary-key }}
       - name: Restore incremental PLT
+        if: ${{ !inputs.warm_only && !inputs.retention_only }}
         id: iplt-cache
         uses: actions/cache/restore@v5
         with:
@@ -119,39 +131,46 @@ jobs:
           key: iplt-probe-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.v.outputs.erlang }}-${{ steps.v.outputs.elixir }}-test-${{ hashFiles('mix.lock', 'mix.exs', '.github/scripts/dialyzer_probe*.exs') }}-${{ hashFiles('lib/**', 'test/support/**', 'config/**', 'VERSION') }}
           restore-keys: |
             iplt-probe-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.v.outputs.erlang }}-${{ steps.v.outputs.elixir }}-test-
+      - name: Restore original incremental PLT
+        if: ${{ inputs.warm_only || inputs.retention_only }}
+        uses: actions/cache/restore@v5
+        with:
+          path: dialyzer-incremental
+          key: ${{ inputs.reference_iplt_key }}
+          fail-on-cache-miss: true
       - name: Stock Dialyxir reference
-        if: ${{ !inputs.warm_only }}
+        if: ${{ !inputs.warm_only && !inputs.retention_only }}
         run: mix run --no-start --no-compile .github/scripts/dialyzer_probe_stock.exs
       - name: Classic baseline
-        if: ${{ !inputs.warm_only }}
+        if: ${{ !inputs.warm_only && !inputs.retention_only }}
         run: mix run --no-start --no-compile .github/scripts/dialyzer_probe.exs classic baseline-classic
       - name: Incremental initial analysis
-        if: ${{ !inputs.warm_only }}
+        if: ${{ !inputs.warm_only && !inputs.retention_only }}
         run: mix run --no-start --no-compile .github/scripts/dialyzer_probe.exs incremental baseline-incremental
       - name: Save successfully analyzed incremental PLT
-        if: ${{ !inputs.warm_only && steps.iplt-cache.outputs.cache-hit != 'true' }}
+        if: ${{ !inputs.warm_only && !inputs.retention_only && steps.iplt-cache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@v5
         with:
           path: dialyzer-incremental
           key: ${{ steps.iplt-cache.outputs.cache-primary-key }}
       - name: Record initial diagnostic parity
-        if: ${{ !inputs.warm_only }}
+        if: ${{ !inputs.warm_only && !inputs.retention_only }}
         run: |
           if ! elixir .github/scripts/dialyzer_probe_compare.exs baseline-classic baseline-incremental; then
             touch dialyzer-probe-results/raw-parity-mismatch
           fi
           elixir .github/scripts/dialyzer_probe_deltas.exs baseline-classic baseline-incremental
       - name: Incremental unchanged analysis
-        if: ${{ !inputs.warm_only }}
+        if: ${{ !inputs.warm_only && !inputs.retention_only }}
         run: mix run --no-start --no-compile .github/scripts/dialyzer_probe.exs incremental unchanged-incremental
       - name: Compare unchanged diagnostic parity
-        if: ${{ !inputs.warm_only }}
+        if: ${{ !inputs.warm_only && !inputs.retention_only }}
         run: elixir .github/scripts/dialyzer_probe_compare.exs baseline-incremental unchanged-incremental
       - name: Compare changed inputs and retained warnings
-        if: ${{ inputs.extended && !inputs.warm_only }}
+        if: ${{ inputs.extended && !inputs.warm_only && !inputs.retention_only }}
         run: .github/scripts/dialyzer_probe_scenarios.sh
       - name: Download original diagnostic baseline
-        if: inputs.warm_only
+        if: ${{ inputs.warm_only || inputs.retention_only }}
         uses: actions/download-artifact@v4
         with:
           name: dialyzer-probe-${{ inputs.reference_run }}-1
@@ -168,6 +187,9 @@ jobs:
         run: |
           cp dialyzer-probe-reference/baseline-incremental.* dialyzer-probe-results/
           elixir .github/scripts/dialyzer_probe_compare.exs baseline-incremental restored-incremental
+      - name: Finish cached warning retention and fixes
+        if: inputs.retention_only
+        run: .github/scripts/dialyzer_probe_retention.sh
       - name: Measure cache sizes
         if: always()
         run: du -sh dialyzer dialyzer-incremental || true
@@ -179,5 +201,5 @@ jobs:
           path: dialyzer-probe-results
           retention-days: 14
       - name: Require exact raw diagnostic parity
-        if: ${{ !inputs.warm_only }}
+        if: ${{ !inputs.warm_only && !inputs.retention_only }}
         run: test ! -e dialyzer-probe-results/raw-parity-mismatch
