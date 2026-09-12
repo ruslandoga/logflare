@@ -3,8 +3,11 @@ defmodule LogflareWeb.EndpointsLiveTest do
 
   use LogflareWeb.ConnCase
 
+  import ExUnit.CaptureLog
   import Logflare.ClickHouseMappedEvents, only: [build_mapped_log_event: 1]
   import Logflare.DataCase, only: [setup_clickhouse_test: 1]
+
+  alias Logflare.Backends.Adaptor.QueryResult
 
   setup %{conn: conn} do
     insert(:plan)
@@ -60,21 +63,42 @@ defmodule LogflareWeb.EndpointsLiveTest do
       attacker = insert(:user, endpoints_beta: true)
       victim = insert(:user, endpoints_beta: true)
       backend = insert(:postgres_backend, user: victim, config: postgres_backend_config())
+      attacker_id = attacker.id
+
+      expect(Logflare.Backends.Adaptor.BigQueryAdaptor, :execute_query, 1, fn query_backend,
+                                                                              _query,
+                                                                              _opts ->
+        assert %Logflare.Backends.Backend{
+                 id: nil,
+                 type: :bigquery,
+                 user_id: ^attacker_id
+               } = query_backend
+
+        {:ok,
+         QueryResult.new([
+           %{"testing" => "attacker-preview-result"}
+         ])}
+      end)
+
+      reject(Logflare.Backends.Adaptor.PostgresAdaptor.SharedRepo, :with_repo, 2)
 
       {:ok, view, _html} =
         conn
         |> login_user(attacker)
         |> live_with_redirect(~p"/endpoints/new")
 
-      view
-      |> element("form#endpoint")
-      |> render_change(%{
-        endpoint: %{
-          backend_id: backend.id,
-          name: "forged endpoint",
-          query: "SELECT 1 as testing"
-        }
-      })
+      html =
+        view
+        |> element("form#endpoint")
+        |> render_change(%{
+          endpoint: %{
+            backend_id: backend.id,
+            name: "forged endpoint",
+            query: "SELECT 1 as testing"
+          }
+        })
+
+      assert html =~ "Backend not found"
 
       html =
         view
@@ -86,7 +110,7 @@ defmodule LogflareWeb.EndpointsLiveTest do
           }
         })
 
-      assert html =~ "Backend not found"
+      assert html =~ "attacker-preview-result"
     end
   end
 
@@ -546,6 +570,7 @@ defmodule LogflareWeb.EndpointsLiveTest do
   end
 
   describe "run query errors" do
+    @tag capture_log: true
     test "backend errors display a generic message", %{conn: conn, user: user} do
       endpoint = insert(:endpoint, user: user, query: "select current_datetime() as ts")
 
@@ -853,27 +878,35 @@ defmodule LogflareWeb.EndpointsLiveTest do
       assert render(view) =~ "test error"
     end
 
-    test "displays error for invalid table reference in sandbox query", %{
+    test "rejects owned sources outside sandbox CTEs", %{
       conn: conn,
-      endpoint: endpoint
+      endpoint: endpoint,
+      user: user
     } do
+      insert(:source, user: user, name: "unauthorized_table")
+
       {:ok, view, _html} = live_with_redirect(conn, "/endpoints/#{endpoint.id}")
 
-      view
-      |> element("form", "Test Sandbox Query")
-      |> render_submit(%{
-        sandbox_form: %{
-          query_mode: "sql",
-          sandbox_query: "SELECT * FROM unauthorized_table",
-          params: %{},
-          show_transformed: "false"
-        }
-      })
+      reject(Logflare.Backends.Adaptor.BigQueryAdaptor, :execute_query, 3)
 
-      html = render(view)
+      log =
+        capture_log(fn ->
+          view
+          |> element("form", "Test Sandbox Query")
+          |> render_submit(%{
+            sandbox_form: %{
+              query_mode: "sql",
+              sandbox_query: "SELECT err FROM unauthorized_table",
+              params: %{},
+              show_transformed: "false"
+            }
+          })
+        end)
 
-      assert html =~ "Error occurred when running sandbox query"
-      assert has_element?(view, ".alert-danger")
+      assert log =~ "Sandbox query failed"
+      assert log =~ "Table not found in CTE: (unauthorized_table)"
+      assert render(view) =~ "Error occurred when running sandbox query"
+      assert has_element?(view, ".alert-danger", "Please verify your query syntax.")
     end
 
     test "shows transformed query when checkbox is enabled", %{conn: conn, endpoint: endpoint} do
@@ -963,24 +996,29 @@ defmodule LogflareWeb.EndpointsLiveTest do
     test "sandbox query handles LQL parsing errors gracefully", %{conn: conn, endpoint: endpoint} do
       {:ok, view, _html} = live_with_redirect(conn, "/endpoints/#{endpoint.id}")
 
-      # Submit invalid LQL that will fail parsing
-      assert view
-             |> element("form", "Test Sandbox Query")
-             |> render_submit(%{
-               sandbox_form: %{
-                 query_mode: "lql",
-                 sandbox_query: "m.invalid:field:with:colons",
-                 params: %{},
-                 show_transformed: "false"
-               }
-             })
+      reject(Logflare.Backends.Adaptor.BigQueryAdaptor, :execute_query, 3)
 
-      html = render(view)
+      log =
+        capture_log(fn ->
+          view
+          |> element("form", "Test Sandbox Query")
+          |> render_submit(%{
+            sandbox_form: %{
+              query_mode: "lql",
+              sandbox_query: "timestamp:>20",
+              params: %{},
+              show_transformed: "false"
+            }
+          })
+        end)
 
-      assert html =~ "Error occurred when running sandbox query" or
-               has_element?(view, "h5", "Sandbox Query Error")
+      assert log =~ "Sandbox query failed"
+      assert log =~ "Error while parsing timestamp"
+      assert render(view) =~ "Error occurred when running sandbox query"
+      assert has_element?(view, ".alert-danger", "Please verify your query syntax.")
     end
 
+    @tag capture_log: true
     test "sandbox query section preserves query input on error", %{conn: conn, endpoint: endpoint} do
       {:ok, view, _html} = live_with_redirect(conn, "/endpoints/#{endpoint.id}")
 
@@ -1023,37 +1061,40 @@ defmodule LogflareWeb.EndpointsLiveTest do
       assert html =~ "restricted to the CTE tables"
     end
 
-    test "sandbox query errors do not expose Ecto query internals", %{conn: conn, user: user} do
-      endpoint =
-        insert(:endpoint,
-          user: user,
-          sandboxable: true,
-          query: """
-          WITH event_logs AS (
-            SELECT timestamp, event_message FROM YourApp.SourceName
-          )
-          SELECT * FROM event_logs
-          """
-        )
+    test "sandbox query errors do not expose Ecto query internals", %{
+      conn: conn,
+      endpoint: endpoint
+    } do
+      endpoint_id = endpoint.id
+      raw_error = "%Ecto.Query{from e0 in private_events, select: field(e0, :timestamp)}"
+
+      expect(Logflare.Endpoints, :run_query, 1, fn
+        %Logflare.Endpoints.EndpointQuery{id: ^endpoint_id}, %{"lql" => "s:err"} ->
+          {:error, raw_error}
+      end)
 
       {:ok, view, _html} = live_with_redirect(conn, "/endpoints/#{endpoint.id}")
 
-      view
-      |> element("form", "Test Sandbox Query")
-      |> render_submit(%{
-        sandbox_form: %{
-          query_mode: "lql",
-          sandbox_query: "c:avg(timestamp)",
-          params: %{},
-          show_transformed: "false"
-        }
-      })
+      log =
+        capture_log(fn ->
+          view
+          |> element("form", "Test Sandbox Query")
+          |> render_submit(%{
+            sandbox_form: %{
+              query_mode: "lql",
+              sandbox_query: "s:err",
+              params: %{},
+              show_transformed: "false"
+            }
+          })
+        end)
 
-      # Should show error without exposing Ecto query internals
-      assert has_element?(view, ".alert-danger") or
-               has_element?(view, "h5", "Sandbox Query Error")
+      assert log =~ "Sandbox query failed"
+      assert log =~ raw_error
+      assert has_element?(view, ".alert-danger", "Please verify your query syntax.")
 
       html = render(view)
+      assert html =~ "Error occurred when running sandbox query"
       refute html =~ "field(e0"
       refute html =~ "from e0 in"
       refute html =~ "%Ecto.Query{"
