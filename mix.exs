@@ -214,7 +214,8 @@ defmodule Logflare.Mixfile do
       {:dialyxir, "~> 1.1", only: [:dev, :test], runtime: false},
 
       # Billing
-      {:stripity_stripe, "~> 3.2.0"},
+      {:stripity_stripe, "~> 3.2.0",
+       github: "beam-community/stripity-stripe", ref: "a1a1d3a759ed78b7a75f43dddc81d86ea3db3050"},
       {:money, "~> 1.14"},
 
       # Utils
