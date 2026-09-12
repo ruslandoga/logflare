@@ -4,6 +4,7 @@ defmodule LogflareWeb.QueryLiveTest do
 
   alias Logflare.Backends.Adaptor.ClickHouseAdaptor
   alias Logflare.Backends.Adaptor.QueryResult
+  alias Logflare.Backends.QueryError
 
   setup %{conn: conn} do
     insert(:plan)
@@ -121,24 +122,35 @@ defmodule LogflareWeb.QueryLiveTest do
              }) =~ "parser error"
     end
 
-    test "shows backend adaptor error", %{conn: conn, user: user} do
-      source = insert(:source, user: user, name: "query_live_backend_error")
+    test "selected ClickHouse backend errors display a generic message", %{conn: conn, user: user} do
+      backend = insert(:backend, user: user, type: :clickhouse)
+      backend_id = backend.id
+      raw_detail = "raw ClickHouse backend detail"
 
-      {source, backend} = Logflare.DataCase.setup_clickhouse_test(user: user, source: source)
+      expect(ClickHouseAdaptor, :execute_query, fn
+        %{id: ^backend_id, type: :clickhouse}, _query, opts ->
+          assert opts[:use_query_cache] == false
 
-      start_supervised!({ClickHouseAdaptor, backend})
+          {:error,
+           %QueryError{
+             kind: :backend_error,
+             raw_error: %Ch.Error{message: raw_detail},
+             backend: ClickHouseAdaptor
+           }}
+      end)
 
-      query = ~s(select non_existent from "#{source.name}")
+      query = "SELECT 1 AS result"
 
       {:ok, view, _html} =
-        live_with_redirect(conn, ~p"/query?#{%{backend_id: backend.id, q: query}}")
+        live_with_redirect(conn, ~p"/query?#{%{backend_id: backend_id, q: query}}")
 
       html =
         view
         |> element("form#query-form")
-        |> render_submit(%{backend: %{backend_id: backend.id}})
+        |> render_submit(%{backend: %{backend_id: backend_id}})
 
       assert html =~ LogflareWeb.QueryErrorHelpers.generic_query_error_message()
+      refute String.downcase(html) =~ String.downcase(raw_detail)
     end
   end
 
