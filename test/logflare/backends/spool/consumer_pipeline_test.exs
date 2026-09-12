@@ -142,6 +142,7 @@ defmodule Logflare.Backends.Spool.ConsumerPipelineTest do
                       %{count: 1}, %{reason: :missing_source_id}}
     end
 
+    @tag capture_log: true
     test "a raising dispatch fails only that source's messages", %{source: source} do
       TestUtils.attach_forwarder([:logflare, :backends, :spool, :consumer, :skipped])
 
@@ -177,6 +178,7 @@ defmodule Logflare.Backends.Spool.ConsumerPipelineTest do
   end
 
   describe "ack/3" do
+    @tag capture_log: true
     test "emits messages_failed telemetry when Broadway marks messages as failed" do
       TestUtils.attach_forwarder([:logflare, :backends, :spool, :consumer, :messages_failed])
 
