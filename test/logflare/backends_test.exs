@@ -2138,6 +2138,21 @@ defmodule Logflare.BackendsTest do
 
       start_supervised!(SpoolDurableBufferSup)
 
+      # The supervisor waits for partitions, but their linked committers may still upload.
+      # DurableBuffer has no public committer lookup, so read their PIDs here and wait
+      # for them before cleanup removes WAL files and mocks.
+      committers =
+        Enum.map(SpoolDurableBufferSup.partitions(), fn partition ->
+          :sys.get_state(partition).committer
+        end)
+
+      on_exit(fn ->
+        Enum.each(committers, fn committer ->
+          ref = Process.monitor(committer)
+          assert_receive {:DOWN, ^ref, :process, ^committer, _reason}, to_timeout(second: 5)
+        end)
+      end)
+
       {:ok, source: source}
     end
 
@@ -2226,6 +2241,7 @@ defmodule Logflare.BackendsTest do
       assert pending_entry_count() == 0
     end
 
+    @tag capture_log: true
     test "falls back to normal dispatch when no spool partition is registered (e.g. the subtree crashed and is mid-restart)",
          %{source: source} do
       # Simulates the only window this can actually happen in — see
