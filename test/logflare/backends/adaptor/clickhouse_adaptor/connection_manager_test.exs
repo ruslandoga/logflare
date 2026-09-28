@@ -5,6 +5,7 @@ defmodule Logflare.Backends.Adaptor.ClickHouseAdaptor.ConnectionManagerTest do
   alias Logflare.Backends.Adaptor.ClickHouseAdaptor.ConnectionManager
 
   @resolve_interval :timer.minutes(1)
+  @timeout_interval :timer.seconds(2)
 
   setup do
     insert(:plan, name: "Free")
@@ -477,10 +478,18 @@ defmodule Logflare.Backends.Adaptor.ClickHouseAdaptor.ConnectionManagerTest do
 
   defp capture_ch_opts(backend, label) do
     test_pid = self()
+    initial_state = fn -> :ok end
+    {:via, Registry, {registry, key}} = ConnectionManager.connection_pool_via(backend, label)
 
     stub(Ch, :start_link, fn opts ->
-      send(test_pid, {:ch_opts, opts})
-      Agent.start_link(fn -> :ok end)
+      case Keyword.get(opts, :name) do
+        {:via, Registry, {^registry, ^key, _metadata}} ->
+          send(test_pid, {:ch_opts, opts})
+          Agent.start_link(initial_state)
+
+        _name ->
+          Mimic.call_original(Ch, :start_link, [opts])
+      end
     end)
 
     {:ok, _manager_pid} = ConnectionManager.start_link(backend, label)

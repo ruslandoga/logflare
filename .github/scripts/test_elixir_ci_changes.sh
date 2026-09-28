@@ -116,7 +116,8 @@ native lockfile|native/sqlparser_ex/Cargo.lock
 Mix configuration|mix.exs
 Mix dependencies|mix.lock
 formatting configuration|.formatter.exs
-lint configuration|.credo.exs
+lint configuration|config/.credo.exs
+structural baseline|.reach.baseline.json
 Dialyzer suppressions|.dialyzer_ignore.exs
 version input|VERSION
 base Dockerfile|Dockerfile.base

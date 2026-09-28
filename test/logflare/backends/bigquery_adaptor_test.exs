@@ -168,7 +168,6 @@ defmodule Logflare.Backends.BigQueryAdaptorTest do
 
       assert {:ok, _} = Backends.ingest_logs([log_event], source)
 
-      # Allow for the 1 second producer poll, 1.5 second batch timeout, and CI scheduling delays.
       assert_receive :patched, to_timeout(second: 5)
       assert_buffers_empty(source.id)
     end
@@ -203,8 +202,8 @@ defmodule Logflare.Backends.BigQueryAdaptorTest do
 
       assert {:ok, _} = Backends.ingest_logs([log_event], source)
 
-      assert_receive {^ref, nil}, 2_500
-      assert_receive {^ref, ^backend_id}, 2_500
+      assert_receive {^ref, nil}, to_timeout(millisecond: 2_500)
+      assert_receive {^ref, ^backend_id}, to_timeout(millisecond: 2_500)
 
       assert_buffers_empty(source_id, backend_id)
     end

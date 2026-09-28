@@ -6,10 +6,7 @@ defmodule LogflareWeb.Source.SearchLVTest do
   import ExUnit.CaptureLog
 
   alias Ecto.Adapters.SQL
-  alias GoogleApi.BigQuery.V2.Model.TableSchema, as: TS
-  alias GoogleApi.BigQuery.V2.Model.TableFieldSchema, as: TFS
   alias Logflare.Backends
-  alias Logflare.Backends.Adaptor.BigQueryAdaptor
   alias Logflare.Backends.Adaptor.PostgresAdaptor
   alias Logflare.Google.BigQuery.SchemaUtils
   alias Logflare.Logs.EventPage
@@ -18,7 +15,6 @@ defmodule LogflareWeb.Source.SearchLVTest do
   alias Logflare.NaturalLanguageLql.AnthropicClient
   alias Logflare.SingleTenant
   alias Logflare.Sources.Source.BigQuery.Schema
-  alias Logflare.Sources.Source.BigQuery.SchemaBuilder
   alias Logflare.Utils.Tasks
   alias LogflareWeb.SearchLive.EventPagination
   alias LogflareWeb.Source.SearchLV

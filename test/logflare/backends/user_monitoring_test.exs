@@ -374,7 +374,7 @@ defmodule Logflare.Backends.UserMonitoringTest do
 
       assert {:ok, _} = Backends.ingest_logs([%{"message" => "test webhook egress"}], source)
 
-      assert_receive {:egress_metric, %{"attributes" => [attributes]}}, 15_000
+      assert_receive {:egress_metric, %{"attributes" => [attributes]}}, to_timeout(second: 15)
 
       assert attributes["source_id"] == source.id
       assert attributes["user_id"] == user.id

@@ -52,7 +52,7 @@ else
         test/*_test.exs)
           backend=true
           ;;
-        .github/scripts/*|config/*|docs/docs.logflare.com/docs/*|lib/*|native/*|priv/*|test/*|*.exs|*.lock|VERSION|Dockerfile.base|Dockerfile.runner|Dockerfile.multi-step)
+        .github/scripts/*|config/*|docs/docs.logflare.com/docs/*|lib/*|native/*|priv/*|test/*|*.exs|*.lock|VERSION|.reach.baseline.json|Dockerfile.base|Dockerfile.runner|Dockerfile.multi-step)
           backend=true
           static=true
           ;;

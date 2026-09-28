@@ -11,6 +11,7 @@ on:
       - ".tool-versions"
       - "Cargo.toml"
       - "VERSION"
+      - ".reach.baseline.json"
       - "assets/**"
       - "lib/**"
       - "config/**"
@@ -108,13 +109,11 @@ jobs:
           version-type: strict
 
       - name: Install Rust
-        if: needs.versions.outputs.static == 'true'
         uses: dtolnay/rust-toolchain@v1
         with:
           toolchain: ${{ needs.versions.outputs.rust }}
 
       - name: Restore Cargo cache
-        if: needs.versions.outputs.static == 'true'
         uses: actions/cache@v5
         with:
           path: |
@@ -152,10 +151,9 @@ jobs:
             deps
             _build
             priv/native
-          key: mix-v5-Linux-27.3.4.6-1.19.5-otp-27-compile-9a6949383b1e545017858bd4dc2194eed1da26cb845044dc091c72d0099cd9db-dfcedfe5946a1f01fa3eb6b59df3d657b90b908529d661c3443d2925aaebb6f9
+          key: mix-v5-Linux-27.3.4.6-1.19.5-otp-27-compile-82f0e8aa9ea91aa040a669fb1cc432d533840441fe0ee250d3d705f90023056f-ccb08feb34f97e8506d661f40d49b352548a7f4eec3ee90fadee92bb01201f94
 
       - name: Prepare in-app docs
-        if: needs.versions.outputs.static == 'true'
         run: |
           rm -rf priv/docs
           cp -R docs/docs.logflare.com/docs priv/docs
@@ -186,7 +184,7 @@ jobs:
 
       - name: Compile with warnings as errors
         id: compile
-        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' && needs.versions.outputs.static == 'true' }}
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: mix test.compile
 
       - name: Save compiled Mix cache
@@ -222,7 +220,7 @@ jobs:
 
       - name: Check types
         id: types
-        if: ${{ !cancelled() && steps.compile.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.compile.outcome == 'success' && needs.versions.outputs.static == 'true' }}
         env:
           LEGACY_PLT_CACHE: ${{ startsWith(steps.plt_cache.outputs.cache-matched-key, 'plt-') && !startsWith(steps.plt_cache.outputs.cache-matched-key, 'plt-v2-') }}
         run: |
@@ -343,7 +341,7 @@ jobs:
             deps
             _build
             priv/native
-          key: mix-v5-Linux-27.3.4.6-1.19.5-otp-27-compile-9a6949383b1e545017858bd4dc2194eed1da26cb845044dc091c72d0099cd9db-dfcedfe5946a1f01fa3eb6b59df3d657b90b908529d661c3443d2925aaebb6f9
+          key: mix-v5-Linux-27.3.4.6-1.19.5-otp-27-compile-82f0e8aa9ea91aa040a669fb1cc432d533840441fe0ee250d3d705f90023056f-ccb08feb34f97e8506d661f40d49b352548a7f4eec3ee90fadee92bb01201f94
 
       - name: Prepare in-app docs
         run: |
