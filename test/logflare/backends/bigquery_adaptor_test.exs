@@ -3,6 +3,9 @@ defmodule Logflare.Backends.BigQueryAdaptorTest do
   use Logflare.DataCase
   use ExUnitProperties
 
+  alias Google.Cloud.Bigquery.Storage.V1.AppendRowsRequest.ArrowData
+  alias Google.Cloud.Bigquery.Storage.V1.ArrowRecordBatch
+  alias Google.Cloud.Bigquery.Storage.V1.ArrowSchema
   alias Logflare.Backends
   alias Logflare.Backends.SourceSup
   alias Logflare.Backends.Adaptor.BigQueryAdaptor
@@ -212,6 +215,10 @@ defmodule Logflare.Backends.BigQueryAdaptorTest do
 
   describe "default bigquery backend - storage write api" do
     test "can ingest into source without creating a BQ backend" do
+      event = [:logflare, :backends, :pipeline, :ack]
+      ref = :telemetry_test.attach_event_handlers(self(), [event])
+      on_exit(fn -> :telemetry.detach(ref) end)
+
       user = insert(:user)
       source = insert(:source, user: user, bq_storage_write_api: true)
       start_supervised!({SourceSup, source})
@@ -219,24 +226,21 @@ defmodule Logflare.Backends.BigQueryAdaptorTest do
       pid = self()
 
       Logflare.Backends.Adaptor.BigQueryAdaptor.GoogleApiClient
-      |> expect(:append_rows, fn {:arrow, dataframe}, _context, _table_id ->
-        send(pid, :streamed)
-
-        {_arrow_schema, _batch_msgs} =
-          dataframe
-          |> Jason.encode!()
-          |> String.slice(1..-2//1)
-          |> String.replace("},{", "}\n{")
-          |> BigQueryAdaptor.ArrowIPC.get_ipc_bytes()
-
-        {:ok, %Google.Cloud.Bigquery.Storage.V1.AppendRowsResponse{}}
+      |> expect(:append_rows, fn arrow_data, _context, _table_id ->
+        send(pid, {:streamed, arrow_data})
+        :ok
       end)
 
       assert {:ok, 1} = Backends.ingest_logs([log_event], source)
 
-      TestUtils.retry_assert(fn ->
-        assert_receive :streamed, 2500
-      end)
+      assert_receive {:streamed, {:arrow, [%ArrowData{} = arrow_data]}}, 5000
+      assert %ArrowSchema{serialized_schema: schema} = arrow_data.writer_schema
+      assert %ArrowRecordBatch{serialized_record_batch: batch} = arrow_data.rows
+      assert byte_size(schema) > 0
+      assert byte_size(batch) > 0
+
+      assert_receive {^event, ^ref, %{successful: 1, failed: 0}, %{}}, 2500
+      assert_buffers_empty(source.id)
     end
 
     test "can ingest logs with different schemas" do
