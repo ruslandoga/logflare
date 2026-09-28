@@ -2,6 +2,8 @@ defmodule LogflareWeb.QueryLiveTest do
   @moduledoc false
   use LogflareWeb.ConnCase
 
+  import ExUnit.CaptureLog
+
   alias Logflare.Backends.Adaptor.ClickHouseAdaptor
   alias Logflare.Backends.Adaptor.QueryResult
 
@@ -121,24 +123,33 @@ defmodule LogflareWeb.QueryLiveTest do
              }) =~ "parser error"
     end
 
-    test "shows backend adaptor error", %{conn: conn, user: user} do
-      source = insert(:source, user: user, name: "query_live_backend_error")
+    test "selected ClickHouse backend errors display a generic message", %{conn: conn, user: user} do
+      {_source, backend} = Logflare.DataCase.setup_clickhouse_test(user: user, cleanup?: false)
+      backend_id = backend.id
 
-      {source, backend} = Logflare.DataCase.setup_clickhouse_test(user: user, source: source)
+      assert {:ok, %QueryResult{rows: [%{"result" => 1}]}} =
+               ClickHouseAdaptor.execute_query(backend, "SELECT 1 AS result", [])
 
-      start_supervised!({ClickHouseAdaptor, backend})
-
-      query = ~s(select non_existent from "#{source.name}")
+      # No tables are needed; throwIf makes ClickHouse return a deliberate backend error.
+      query = "SELECT throwIf(1) AS result"
+      raw_detail = "FUNCTION_THROW_IF_VALUE_IS_NON_ZERO"
 
       {:ok, view, _html} =
-        live_with_redirect(conn, ~p"/query?#{%{backend_id: backend.id, q: query}}")
+        live_with_redirect(conn, ~p"/query?#{%{backend_id: backend_id, q: query}}")
 
-      html =
-        view
-        |> element("form#query-form")
-        |> render_submit(%{backend: %{backend_id: backend.id}})
+      {html, log} =
+        with_log([metadata: [:backend_id, :error_kind, :error_string]], fn ->
+          view
+          |> element("form#query-form")
+          |> render_submit(%{backend: %{backend_id: backend_id}})
+        end)
 
+      assert log =~ "Backend query error"
+      assert log =~ "backend_id=#{backend_id}"
+      assert log =~ "error_kind=backend_error"
+      assert log =~ raw_detail
       assert html =~ LogflareWeb.QueryErrorHelpers.generic_query_error_message()
+      refute String.downcase(html) =~ String.downcase(raw_detail)
     end
   end
 
