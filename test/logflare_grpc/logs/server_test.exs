@@ -1,9 +1,10 @@
 defmodule LogflareGrpc.Logs.ServerTest do
   use Logflare.DataCase, async: false
 
+  alias Logflare.Backends.SourceSup
+  alias Logflare.SystemMetrics.AllLogsLogged
   alias Opentelemetry.Proto.Collector.Logs.V1.ExportLogsServiceResponse
   alias Opentelemetry.Proto.Collector.Logs.V1.LogsService.Stub
-  alias Logflare.SystemMetrics.AllLogsLogged
 
   setup do
     insert(:plan)
@@ -17,6 +18,7 @@ defmodule LogflareGrpc.Logs.ServerTest do
     setup do
       user = insert(:user)
       source = insert(:source, user: user)
+      start_supervised!({SourceSup, source})
 
       {:ok, _pid, port} = GRPC.Server.start_endpoint(LogflareGrpc.Endpoint, 0)
       on_exit(fn -> GRPC.Server.stop_endpoint(LogflareGrpc.Endpoint) end)

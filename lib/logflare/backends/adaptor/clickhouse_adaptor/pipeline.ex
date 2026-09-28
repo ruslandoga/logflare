@@ -99,6 +99,7 @@ defmodule Logflare.Backends.Adaptor.ClickHouseAdaptor.Pipeline do
   @spec start_link(list()) ::
           {:ok, pid()} | :ignore | {:error, {:already_started, pid()} | term()}
   def start_link(args) do
+    args = Keyword.merge(Application.get_env(:logflare, __MODULE__, []), args)
     {name, args} = Keyword.pop(args, :name)
     backend = Keyword.fetch!(args, :backend)
     processor_concurrency = processor_concurrency()
@@ -112,6 +113,7 @@ defmodule Logflare.Backends.Adaptor.ClickHouseAdaptor.Pipeline do
           {BufferProducer,
            [
              backend_id: backend.id,
+             interval: Keyword.get(args, :producer_interval, 1_000),
              consolidated: true,
              id_passing: true,
              max_in_flight: @max_in_flight,
@@ -131,7 +133,7 @@ defmodule Logflare.Backends.Adaptor.ClickHouseAdaptor.Pipeline do
         ch: [
           concurrency: @batcher_concurrency,
           batch_size: @batch_size,
-          batch_timeout: @batch_timeout
+          batch_timeout: Keyword.get(args, :batch_timeout, @batch_timeout)
         ]
       ],
       context: build_processor_context(backend.id)

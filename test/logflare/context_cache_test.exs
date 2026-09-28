@@ -69,15 +69,27 @@ defmodule Logflare.ContextCacheTest do
 
     test "TransactionBroadcaster subscribes to wal and broadcasts transactions" do
       ContextCache.CacheBuster.subscribe_to_transactions()
-      start_supervised!({TransactionBroadcaster, interval: 100})
-      :timer.sleep(200)
+      broadcaster = start_supervised!(TransactionBroadcaster)
+      TestUtils.send_and_wait_for_handling(broadcaster, :try_subscribe)
+      publisher = ContextCache.Supervisor.publisher_name()
+      assert broadcaster in :sys.get_state(publisher).subscribers
 
-      SQL.Sandbox.unboxed_run(Logflare.Repo, fn ->
-        insert(:user)
-      end)
+      user =
+        SQL.Sandbox.unboxed_run(Logflare.Repo, fn ->
+          insert(:user)
+        end)
 
-      :timer.sleep(500)
-      assert_received %Cainophile.Changes.Transaction{}
+      user_id = Integer.to_string(user.id)
+
+      assert_receive %Cainophile.Changes.Transaction{
+                       changes: [
+                         %Cainophile.Changes.NewRecord{
+                           relation: {_schema, "users"},
+                           record: %{"id" => ^user_id}
+                         }
+                       ]
+                     },
+                     1_000
     end
   end
 end

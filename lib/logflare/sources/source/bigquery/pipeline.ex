@@ -39,7 +39,9 @@ defmodule Logflare.Sources.Source.BigQuery.Pipeline do
   # healthy operation; only caps genuinely runaway backlog.
   @max_in_flight 4 * @max_batch_size * @batcher_concurrency
 
+  @spec start_link(keyword(), keyword()) :: Broadway.on_start()
   def start_link(args, opts \\ []) do
+    args = Keyword.merge(Application.get_env(:logflare, __MODULE__, []), args)
     {name, args} = Keyword.pop(args, :name)
     source = Keyword.get(args, :source)
     backend = Keyword.get(args, :backend)
@@ -65,6 +67,7 @@ defmodule Logflare.Sources.Source.BigQuery.Pipeline do
                [
                  source_id: source.id,
                  backend_id: backend.id,
+                 interval: Keyword.get(args, :producer_interval, 1_000),
                  id_passing: true,
                  max_in_flight: @max_in_flight
                ]},
@@ -81,7 +84,7 @@ defmodule Logflare.Sources.Source.BigQuery.Pipeline do
             bq: [
               concurrency: @batcher_concurrency,
               batch_size: bq_batch_size_splitter(),
-              batch_timeout: 1_500,
+              batch_timeout: Keyword.get(args, :batch_timeout, 1_500),
               # required when using a custom batch_size splitter
               max_demand: @max_batch_size
             ]
