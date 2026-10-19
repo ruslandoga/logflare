@@ -246,7 +246,20 @@ defmodule LogflareWeb.OpenApiSchemas do
     @properties %{
       name: %Schema{type: :string},
       description: %Schema{type: :string, nullable: true},
-      language: %Schema{type: :string},
+      language: %Schema{type: :string, enum: ["bq_sql", "pg_sql", "lql", "promql"]},
+      query_backend_id: %Schema{
+        type: :integer,
+        minimum: 1,
+        nullable: true,
+        description: "VictoriaMetrics backend with query_url configured; required for PromQL"
+      },
+      evaluation_delay_seconds: %Schema{
+        type: :integer,
+        minimum: 0,
+        maximum: 86_400,
+        default: 30,
+        description: "Seconds subtracted from the scheduled evaluation time for PromQL"
+      },
       query: %Schema{type: :string},
       cron: %Schema{type: :string},
       slack_hook_url: %Schema{type: :string, nullable: true},
@@ -255,7 +268,7 @@ defmodule LogflareWeb.OpenApiSchemas do
       backend_ids: %Schema{
         type: :array,
         items: %Schema{type: :integer, minimum: 1},
-        description: "Complete replacement set of attached backend IDs"
+        description: "Complete replacement set of notification backend IDs"
       }
     }
 
@@ -266,7 +279,20 @@ defmodule LogflareWeb.OpenApiSchemas do
     @properties %{
       name: %Schema{type: :string},
       description: %Schema{type: :string, nullable: true},
-      language: %Schema{type: :string},
+      language: %Schema{type: :string, enum: ["bq_sql", "pg_sql", "lql", "promql"]},
+      query_backend_id: %Schema{
+        type: :integer,
+        minimum: 1,
+        nullable: true,
+        description: "VictoriaMetrics backend with query_url configured; required for PromQL"
+      },
+      evaluation_delay_seconds: %Schema{
+        type: :integer,
+        minimum: 0,
+        maximum: 86_400,
+        default: 30,
+        description: "Seconds subtracted from the scheduled evaluation time for PromQL"
+      },
       query: %Schema{type: :string},
       cron: %Schema{type: :string},
       slack_hook_url: %Schema{type: :string, nullable: true},
@@ -275,7 +301,7 @@ defmodule LogflareWeb.OpenApiSchemas do
       backend_ids: %Schema{
         type: :array,
         items: %Schema{type: :integer, minimum: 1},
-        description: "Complete replacement set of attached backend IDs"
+        description: "Complete replacement set of notification backend IDs"
       }
     }
 
@@ -288,7 +314,9 @@ defmodule LogflareWeb.OpenApiSchemas do
       token: %Schema{type: :string},
       name: %Schema{type: :string},
       description: %Schema{type: :string, nullable: true},
-      language: %Schema{type: :string},
+      language: %Schema{type: :string, enum: ["bq_sql", "pg_sql", "lql", "promql"]},
+      query_backend_id: %Schema{type: :integer, nullable: true},
+      evaluation_delay_seconds: %Schema{type: :integer},
       query: %Schema{type: :string},
       cron: %Schema{type: :string},
       slack_hook_url: %Schema{type: :string, nullable: true},
