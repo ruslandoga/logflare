@@ -127,7 +127,7 @@ defmodule LogflareWeb.AlertsLive do
       ) do
     Logger.debug("Saving alert", params: params)
 
-    case upsert_alert(alert, user, params) do
+    case upsert_alert(alert, user, params, actor(socket)) do
       {:ok, updated_alert} ->
         verb = if alert, do: "updated", else: "created"
 
@@ -181,7 +181,8 @@ defmodule LogflareWeb.AlertsLive do
       ) do
     alert = Alerting.get_alert_query!(alert_id)
 
-    with {:ok, alert} <- Alerting.update_alert_query(alert, %{slack_hook_url: nil}) do
+    with {:ok, alert} <-
+           Alerting.update_alert_query(alert, %{slack_hook_url: nil}, actor: actor(socket)) do
       alert = Alerting.preload_alert_query(alert)
 
       {:noreply,
@@ -217,7 +218,7 @@ defmodule LogflareWeb.AlertsLive do
         else: %AlertQuery{query: query, language: :bq_sql, user: user, user_id: user.id}
 
     with {:ok, %QueryResult{rows: [_ | _]} = result} <-
-           Alerting.execute_alert_query(test_alert, use_query_cache: false) do
+           Alerting.execute_alert_query(test_alert, use_query_cache: false, actor: actor(socket)) do
       {:noreply,
        socket
        |> assign(:query_result_rows, result.rows)
@@ -247,7 +248,7 @@ defmodule LogflareWeb.AlertsLive do
         %{assigns: %{alert: %_{} = alert}} = socket
       ) do
     with {:ok, %QueryResult{} = result} <-
-           Alerting.execute_alert_query(alert, use_query_cache: false) do
+           Alerting.execute_alert_query(alert, use_query_cache: false, actor: actor(socket)) do
       {:noreply,
        socket
        |> assign(:query_result_rows, result.rows)
@@ -281,7 +282,9 @@ defmodule LogflareWeb.AlertsLive do
 
     socket =
       if backend do
-        case Alerting.update_alert_query(alert, %{backends: [backend | alert.backends]}) do
+        case Alerting.update_alert_query(alert, %{backends: [backend | alert.backends]},
+               actor: actor(socket)
+             ) do
           {:ok, updated_alert} ->
             updated_alert = Alerting.preload_alert_query(updated_alert)
 
@@ -310,9 +313,11 @@ defmodule LogflareWeb.AlertsLive do
 
     socket =
       if backend do
-        Alerting.update_alert_query(alert, %{
-          backends: Enum.filter(alert.backends, &(&1.id != backend.id))
-        })
+        Alerting.update_alert_query(
+          alert,
+          %{backends: Enum.filter(alert.backends, &(&1.id != backend.id))},
+          actor: actor(socket)
+        )
         |> case do
           {:ok, updated_alert} ->
             updated_alert = Alerting.preload_alert_query(updated_alert)
@@ -340,7 +345,7 @@ defmodule LogflareWeb.AlertsLive do
         _params,
         %{assigns: %{alert: %_{} = alert}} = socket
       ) do
-    case Alerting.trigger_alert_now(alert) do
+    case Alerting.trigger_alert_now(alert, actor: actor(socket)) do
       {:ok, job} ->
         Process.send_after(self(), {:poll_job, job.id, 0}, @poll_interval)
 
@@ -523,10 +528,13 @@ defmodule LogflareWeb.AlertsLive do
       else: 1
   end
 
-  defp upsert_alert(alert, user, params) do
+  @spec actor(Phoenix.LiveView.Socket.t()) :: Logflare.User.t() | Logflare.TeamUsers.TeamUser.t()
+  defp actor(socket), do: socket.assigns.team_user || socket.assigns.user
+
+  defp upsert_alert(alert, user, params, actor) do
     case alert do
-      nil -> Alerting.create_alert_query(user, params)
-      %_{} -> Alerting.update_alert_query(alert, params)
+      nil -> Alerting.create_alert_query(user, params, actor: actor)
+      %_{} -> Alerting.update_alert_query(alert, params, actor: actor)
     end
   end
 
