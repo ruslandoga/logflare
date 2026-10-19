@@ -4,7 +4,7 @@ sidebar_position: 14
 
 # VictoriaMetrics
 
-The VictoriaMetrics backend sends metric events to [VictoriaMetrics](https://victoriametrics.com) using the Prometheus remote write protocol (v1). Configure a read URL to also run raw PromQL queries through Logflare's management API.
+The VictoriaMetrics backend sends metric events to [VictoriaMetrics](https://victoriametrics.com) using the Prometheus remote write protocol (v1). Configure a read URL to also run raw PromQL queries through Logflare's management API and scheduled [PromQL alerts](/alerts#promql-alerts).
 
 ## Behaviour and configurations
 
@@ -47,7 +47,7 @@ Do not combine `time` with range parameters. Timestamp and duration values are f
 
 Queries return the native Prometheus response envelope, including `status`, `data.resultType`, and `data.result`, or the upstream error envelope. Logflare passes the expression through without SQL conversion or source filtering. Queries can access the data permitted by the configured VictoriaMetrics credentials and tenant URL.
 
-PromQL is available through this API; the dashboard query editor, saved Endpoints, and Alerts do not support it. The backend's **Test connection** action checks the write endpoint; execute a query to verify the read endpoint.
+PromQL is available through this API and [Query Alerts](/alerts#promql-alerts). The dashboard query editor and saved Endpoints do not support it. The backend's **Test connection** action checks the write endpoint; execute a query to verify the read endpoint.
 
 ### Implementation Details
 
