@@ -141,6 +141,8 @@ OTLP logs, metrics, and traces can omit the resource and instrumentation scope m
 
 Scalar or array resource attributes named `service` are accepted. Project extraction uses a nested `service.name` when available, then the flat `service.name` attribute.
 
+OTLP byte values are represented as Base64 strings, including bytes nested in arrays and attribute maps. String values remain unchanged.
+
 ## Pipeline Transformations
 
 At ingestion, the pipeline will perform the following in sequence:

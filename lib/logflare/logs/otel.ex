@@ -92,6 +92,8 @@ defmodule Logflare.Logs.Otel do
     handle_attributes(values)
   end
 
+  def extract_value(%AnyValue{value: {:bytes_value, value}}), do: Base.encode64(value)
+
   def extract_value(%_{value: {_type, value}}), do: value
   def extract_value(%_{value: nil}), do: nil
   def extract_value(nil), do: nil
