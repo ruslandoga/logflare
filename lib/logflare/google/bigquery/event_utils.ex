@@ -3,10 +3,15 @@ defmodule Logflare.Google.BigQuery.EventUtils do
   Event utils for BigQuery.
   """
 
+  alias Logflare.Backends.Adaptor.BigQueryAdaptor.Formatter
+  alias Logflare.LogEvent
+
   @doc """
   Converts LogEvent's body into a valid dataframe struct for Explorer
   """
-  def log_event_to_df_struct(%Logflare.LogEvent{body: body}) do
+  @spec log_event_to_df_struct(LogEvent.t()) :: map()
+  def log_event_to_df_struct(%LogEvent{} = event) do
+    %{body: body} = Formatter.format(event)
     {:ok, bq_timestamp} = DateTime.from_unix(body["timestamp"], :microsecond)
 
     for {k, v} <- body, into: %{} do

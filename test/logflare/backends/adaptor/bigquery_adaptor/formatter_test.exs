@@ -1,11 +1,92 @@
-defmodule Logflare.Logs.IngestTransformerTest do
-  @moduledoc false
+defmodule Logflare.Backends.Adaptor.BigQueryAdaptor.FormatterTest do
   use ExUnit.Case
   use ExUnitProperties
 
-  import Logflare.Logs.IngestTransformers
+  import Logflare.Backends.Adaptor.BigQueryAdaptor.Formatter
 
+  alias Logflare.Backends.Adaptor.BigQueryAdaptor.Formatter
+  alias Logflare.LogEvent
   alias Logflare.Logs.Ingest.MetadataCleaner
+
+  describe "format/1" do
+    test "formats a destination copy and retains the shared event's original values" do
+      event = %LogEvent{
+        body: %{
+          "id" => "event-id",
+          "timestamp" => 1_700_000_000_000_000,
+          "event_message" => "",
+          "attributes" => %{
+            "http.route" => "/checkout",
+            "1.key" => "value",
+            "empty" => %{},
+            "items" => [nil, "", false, 0, "item"]
+          }
+        }
+      }
+
+      formatted = Formatter.format(event)
+
+      assert formatted.body_format == :bigquery
+
+      assert formatted.body["attributes"] == %{
+               "_http_route" => "/checkout",
+               "__1_key" => "value",
+               "empty" => %{},
+               "items" => [nil, "", false, 0, "item"]
+             }
+
+      assert formatted.body["event_message"] == ""
+      assert event.body_format == :original
+      assert event.body["attributes"]["http.route"] == "/checkout"
+      assert event.body["attributes"]["items"] == [nil, "", false, 0, "item"]
+    end
+
+    test "invalidates cached sizes only on the destination copy when normalized keys collide" do
+      body = %{"attributes" => %{"a!b" => "value", "a?b" => "value"}}
+      event = LogEvent.cache_sizes(%LogEvent{body: body})
+      original_batch_bytes = event.batch_bytes
+
+      formatted = Formatter.format(event)
+
+      assert formatted.body == %{"attributes" => %{"_a_b" => "value"}}
+      assert formatted.accounted_bytes == nil
+      assert formatted.batch_bytes == nil
+
+      cached_formatted = LogEvent.cache_sizes(formatted)
+      assert cached_formatted.accounted_bytes == 5
+      assert cached_formatted.batch_bytes == :erlang.external_size(formatted.body)
+      assert cached_formatted.batch_bytes < original_batch_bytes
+
+      assert event.body == body
+      assert event.body_format == :original
+      assert event.accounted_bytes == 10
+      assert event.batch_bytes == original_batch_bytes
+    end
+
+    test "retains cached sizes when the body already uses BigQuery keys" do
+      event = LogEvent.cache_sizes(%LogEvent{body: %{"safe_key" => "value"}})
+      formatted = Formatter.format(event)
+
+      assert formatted.body_format == :bigquery
+      assert formatted.body == event.body
+      assert formatted.accounted_bytes == event.accounted_bytes
+      assert formatted.batch_bytes == event.batch_bytes
+    end
+
+    test "normalizes long names once across schema and encoding boundaries" do
+      key = String.duplicate("a", 150)
+      formatted = Formatter.format(%LogEvent{body: %{key => "value"}})
+
+      assert formatted.body == %{("_" <> String.duplicate("a", 128)) => "value"}
+      assert Formatter.format(formatted) == formatted
+    end
+
+    test "does not rewrite already-formatted legacy spool keys" do
+      key = "_" <> String.duplicate("a", 128)
+      legacy = %LogEvent{body: %{key => "value"}, body_format: :bigquery}
+      assert Formatter.format(legacy) == legacy
+    end
+  end
 
   describe "BQ spec transformations" do
     test "transformations order is correct" do
@@ -417,7 +498,7 @@ defmodule Logflare.Logs.IngestTransformerTest do
     end
   end
 
-  describe ":clean_to_bigquery_column_spec fused pipeline" do
+  describe ":clean_to_bigquery_column_spec compatibility transformation" do
     property "matches sequential cleaning and key normalization" do
       check all input <- log_params_generator() do
         assert transform(input, :clean_to_bigquery_column_spec) ==
@@ -425,31 +506,6 @@ defmodule Logflare.Logs.IngestTransformerTest do
                  |> MetadataCleaner.deep_reject_nil_and_empty()
                  |> transform(:to_bigquery_column_spec)
       end
-    end
-
-    property "counts exactly the retained values during transformation" do
-      check all input <- log_params_generator() do
-        {body, bytes} = transform_with_byte_size(input)
-        assert body == transform(input, :clean_to_bigquery_column_spec)
-        assert bytes == Logflare.LogEvent.body_byte_size(body)
-      end
-    end
-
-    test "counts nested arrays and removes empty values without counting keys" do
-      input = %{
-        "ignored-long-key" => nil,
-        "nested" => [%{"bad-key" => "hé", "empty" => []}, [1, -12, true, false, nil]]
-      }
-
-      assert {%{"nested" => [%{"_bad_key" => "hé"}, [1, -12, true, false]]}, 9} =
-               transform_with_byte_size(input)
-    end
-
-    test "counts the surviving values after normalized keys collide" do
-      input = %{"a!b" => "short", "a?b" => "a much longer value"}
-      expected = transform(input, :to_bigquery_column_spec)
-      assert {^expected, bytes} = transform_with_byte_size(input)
-      assert bytes == Logflare.LogEvent.body_byte_size(expected)
     end
 
     test "preserves sequential behavior when cleaned keys collide" do

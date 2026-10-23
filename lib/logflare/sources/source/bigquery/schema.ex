@@ -11,6 +11,7 @@ defmodule Logflare.Sources.Source.BigQuery.Schema do
 
   require Logger
 
+  alias Logflare.Backends.Adaptor.BigQueryAdaptor.Formatter
   alias Logflare.Google.BigQuery
   alias Logflare.Sources.Source.BigQuery.SchemaBuilder
   alias Logflare.Sources.Source.BigQuery.SchemaMetrics
@@ -53,7 +54,7 @@ defmodule Logflare.Sources.Source.BigQuery.Schema do
            Registry.lookup(registry, key),
          :ok <- reserve_update_slot(sample_counter, limit) do
       SchemaMetrics.record_admission(:admitted)
-      GenServer.cast(pid, {:update, log_event, source, sample_counter})
+      GenServer.cast(pid, {:update, Formatter.format(log_event), source, sample_counter})
     else
       :full -> SchemaMetrics.record_admission(:rejected)
       _unavailable -> SchemaMetrics.record_admission(:unavailable)

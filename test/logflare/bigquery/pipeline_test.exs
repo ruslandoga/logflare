@@ -1,5 +1,4 @@
 defmodule Logflare.BigQuery.PipelineTest do
-  @moduledoc false
   use Logflare.DataCase
   use ExUnitProperties
 
@@ -7,16 +6,22 @@ defmodule Logflare.BigQuery.PipelineTest do
 
   alias Broadway.Message
   alias GoogleApi.BigQuery.V2.Model.TableDataInsertAllRequestRows
+  alias GoogleApi.BigQuery.V2.Model.TableDataInsertAllResponse
   alias Logflare.Backends
   alias Logflare.Backends.AdaptorSupervisor
   alias Logflare.Backends.Backend
   alias Logflare.Backends.IngestEventQueue
   alias Logflare.Backends.IngestEventQueue.LogEventPointer
   alias Logflare.Backends.Adaptor.BigQueryAdaptor
+  alias Logflare.Backends.Adaptor.BigQueryAdaptor.Formatter
   alias Logflare.Backends.Spool.Queue.PubSub, as: QueueMod
   alias Logflare.Backends.Spool.SpoolAck
+  alias Logflare.Google.BigQuery
   alias Logflare.LogEvent
+  alias Logflare.Logs.Validators.BigQuerySchemaChange
   alias Logflare.Repo
+  alias Logflare.SourceSchemas
+  alias Logflare.Sources.Source
   alias Logflare.Sources.Source.BigQuery.Pipeline
   alias Logflare.Sources.Source.BigQuery.Schema
   alias Logflare.Sources.Source.BigQuery.SchemaMetrics
@@ -943,6 +948,228 @@ defmodule Logflare.BigQuery.PipelineTest do
     end
   end
 
+  describe "BigQuery formatting boundary" do
+    setup do
+      insert(:plan)
+      user = insert(:user)
+      previous = Application.get_env(:logflare, BigQuerySchemaChange, [])
+      Application.put_env(:logflare, BigQuerySchemaChange, Keyword.put(previous, :enabled, true))
+      on_exit(fn -> Application.put_env(:logflare, BigQuerySchemaChange, previous) end)
+      [user: user]
+    end
+
+    test "formats original keys before schema inference without changing the shared event", %{
+      user: user
+    } do
+      source = insert(:source, user_id: user.id, lock_schema: false)
+      event = original_event(source)
+      original_body = event.body
+
+      expect(Schema, :update, fn _via, formatted, ^source ->
+        assert %LogEvent{valid: true, body_format: :bigquery} = formatted
+        assert formatted.body["metadata"] == formatted_metadata()
+        :ok
+      end)
+
+      assert %LogEvent{valid: true, body_format: :bigquery} =
+               formatted = Pipeline.process_data(event, bq_context(source), source)
+
+      assert formatted.body["metadata"] == formatted_metadata()
+      assert event.body == original_body
+      assert event.body_format == :original
+      assert event.body["metadata"]["http.route"] == "/checkout"
+      assert event.body["metadata"]["a.b"] == "same"
+      assert event.body["metadata"]["_a_b"] == "same"
+    end
+
+    test "rejects a mismatch against the normalized schema before updating it", %{user: user} do
+      source = insert(:source, user_id: user.id, validate_schema: true)
+      put_route_schema(source)
+      event = original_event(source, 42)
+      assert event.valid
+      reject(&Schema.update/3)
+
+      assert %LogEvent{
+               valid: false,
+               body_format: :bigquery,
+               pipeline_error: %{stage: "bigquery", type: "schema", message: reason}
+             } = Pipeline.process_data(event, bq_context(source), source)
+
+      assert reason =~ "metadata._http_route"
+      assert event.valid
+      assert event.pipeline_error == nil
+    end
+
+    test "accepts missing messages after custom message processing and preserves empty strings",
+         %{
+           user: user
+         } do
+      source = insert(:source, user_id: user.id, validate_schema: true)
+
+      assert {:ok, _schema} =
+               SourceSchemas.create_or_update_source_schema(source, %{
+                 bigquery_schema:
+                   Logflare.TestUtils.build_bq_schema(%{"event_message" => "text"}),
+                 schema_flat_map: %{"event_message" => :string}
+               })
+
+      for body_format <- [:original, :bigquery], message <- [nil, ""] do
+        params = if is_nil(message), do: %{}, else: %{"event_message" => message}
+
+        event =
+          params
+          |> LogEvent.make(%{source: source})
+          |> LogEvent.apply_custom_event_message(source)
+          |> Map.put(:body_format, body_format)
+
+        assert Map.fetch!(event.body, "event_message") == message
+
+        expect(Schema, :update, fn _via, formatted, ^source ->
+          assert formatted.valid
+
+          assert Map.fetch(formatted.body, "event_message") ==
+                   if(is_nil(message), do: :error, else: {:ok, ""})
+
+          :ok
+        end)
+
+        assert %LogEvent{valid: true, pipeline_error: nil, body_format: :bigquery} =
+                 Pipeline.process_data(event, bq_context(source), source)
+
+        assert Map.fetch!(event.body, "event_message") == message
+      end
+    end
+
+    for storage? <- [false, true] do
+      test "sends only valid formatted events with storage write #{storage?}", %{user: user} do
+        storage? = unquote(storage?)
+        source = insert(:source, user_id: user.id, bq_storage_write_api: storage?)
+        put_route_schema(source)
+        valid = original_event(source)
+        invalid = original_event(source, 42)
+        {messages, _tid} = setup_queue(source, [valid, invalid])
+        batch_info = %Broadway.BatchInfo{batcher: :bq, batch_key: :bq, size: 2, trigger: :flush}
+
+        :ets.insert(
+          :source_rate_sampler,
+          {{source.token, :bq_schema_check}, System.monotonic_time(:millisecond) - 1_001, 0, 0.0}
+        )
+
+        expect(Schema, :update, fn _via, event, updated_source ->
+          assert updated_source.id == source.id
+          assert event.id == valid.id
+          assert event.body["metadata"] == formatted_metadata()
+          :ok
+        end)
+
+        if storage? do
+          reject(&BigQuery.stream_batch!/2)
+
+          expect(BigQueryAdaptor, :insert_log_events_via_storage_write_api, fn [event], _opts ->
+            assert event.id == valid.id
+            assert event.body_format == :bigquery
+            assert event.body["metadata"] == formatted_metadata()
+            :ok
+          end)
+        else
+          reject(&BigQueryAdaptor.insert_log_events_via_storage_write_api/2)
+
+          expect(BigQuery, :stream_batch!, fn _context, [row] ->
+            assert row.insertId == valid.id
+            assert row.json["metadata"] == [formatted_metadata()]
+            {:ok, %TableDataInsertAllResponse{insertErrors: nil}}
+          end)
+        end
+
+        log =
+          capture_log(fn ->
+            send(
+              self(),
+              {:batch_results,
+               Pipeline.handle_batch(:bq, messages, batch_info, bq_context(source))}
+            )
+          end)
+
+        assert log =~ "schema validation"
+        assert_receive {:batch_results, results}
+
+        assert [%{status: :ok}, %{status: {:failed, {:bigquery_schema, reason}}} = failed] =
+                 results
+
+        assert reason =~ "metadata._http_route"
+        assert failed.data.id == invalid.id
+
+        for message <- messages do
+          pointer = message.data
+          stored = IngestEventQueue.lookup_event(pointer.tid, pointer.gen_event_id)
+          assert stored in [valid, invalid]
+          assert stored.body_format == :original
+          assert Map.has_key?(stored.body["metadata"], "http.route")
+          assert stored.valid
+        end
+
+        ack_ref = {{source.id, nil, self()}, %{max_retries: 3}}
+        failed = %{failed | acknowledger: {Pipeline, ack_ref, %{in_flight_ref: nil}}}
+        capture_log(fn -> Pipeline.ack(ack_ref, [], [failed]) end)
+
+        assert IngestEventQueue.total_pending({source.id, nil, self()}) == 0
+        assert IngestEventQueue.lookup_event(failed.data.tid, failed.data.gen_event_id) == nil
+        assert IngestEventQueue.list_recent_events({source.id, nil}, 10) == []
+      end
+
+      test "does not write an entirely invalid batch with storage write #{storage?}", %{
+        user: user
+      } do
+        source = insert(:source, user_id: user.id, bq_storage_write_api: unquote(storage?))
+        put_route_schema(source)
+        {messages, _tid} = setup_queue(source, [original_event(source, 42)])
+        batch_info = %Broadway.BatchInfo{batcher: :bq, batch_key: :bq, size: 1, trigger: :flush}
+        reject(&Schema.update/3)
+        reject(&BigQuery.stream_batch!/2)
+        reject(&BigQueryAdaptor.insert_log_events_via_storage_write_api/2)
+
+        capture_log(fn ->
+          assert [%{status: {:failed, {:bigquery_schema, _reason}}}] =
+                   Pipeline.handle_batch(:bq, messages, batch_info, bq_context(source))
+        end)
+      end
+    end
+  end
+
+  @spec original_event(Source.t(), String.t() | integer()) :: LogEvent.t()
+  defp original_event(source, route \\ "/checkout") do
+    LogEvent.make(
+      %{
+        "event_message" => "formatting boundary",
+        "metadata" => %{
+          "http.route" => route,
+          "1.key" => 7,
+          "a.b" => "same",
+          "_a_b" => "same",
+          "empty" => %{},
+          "null" => nil,
+          "values" => [nil, "", %{}, [], 7]
+        }
+      },
+      %{source: source}
+    )
+  end
+
+  @spec formatted_metadata() :: map()
+  defp formatted_metadata do
+    %{"_http_route" => "/checkout", "__1_key" => 7, "_a_b" => "same", "values" => [7]}
+  end
+
+  @spec put_route_schema(Source.t()) :: {:ok, Logflare.SourceSchemas.SourceSchema.t()}
+  defp put_route_schema(source) do
+    assert {:ok, _schema} =
+             SourceSchemas.create_or_update_source_schema(source, %{
+               bigquery_schema:
+                 Logflare.TestUtils.build_bq_schema(%{"metadata" => %{"_http_route" => ""}}),
+               schema_flat_map: %{"metadata" => :map, "metadata._http_route" => :string}
+             })
+  end
+
   describe "process_data/3" do
     setup do
       insert(:plan)
@@ -956,11 +1183,12 @@ defmodule Logflare.BigQuery.PipelineTest do
     } do
       source = insert(:source, user_id: user.id, lock_schema: true)
       le = build(:log_event, source: source)
+      formatted = Formatter.format(le)
 
       # the lock decision must come from the threaded source, not a per-event re-fetch
       reject(&Schema.update/3)
 
-      assert ^le = Pipeline.process_data(le, context, source)
+      assert ^formatted = Pipeline.process_data(le, context, source)
     end
 
     test "runs schema update using the passed source when not locked", %{
@@ -969,9 +1197,10 @@ defmodule Logflare.BigQuery.PipelineTest do
     } do
       source = insert(:source, user_id: user.id, lock_schema: false)
       le = build(:log_event, source: source)
+      formatted = Formatter.format(le)
       test_pid = self()
 
-      expect(Schema, :update, fn _via, ^le, ^source ->
+      expect(Schema, :update, fn _via, ^formatted, ^source ->
         send(test_pid, :schema_updated)
         :ok
       end)
@@ -990,7 +1219,7 @@ defmodule Logflare.BigQuery.PipelineTest do
 
       on_exit(fn -> :telemetry.detach(handler_id) end)
 
-      assert ^le = Pipeline.process_data(le, context, source)
+      assert ^formatted = Pipeline.process_data(le, context, source)
       assert_received :schema_updated
       assert :ok = SchemaMetrics.report()
       assert_receive {:sample_counts, %{samples_selected: 1, samples_selected_zero_rate: 1}}
@@ -1024,8 +1253,10 @@ defmodule Logflare.BigQuery.PipelineTest do
       le =
         %{le | body: %{"event_message" => "test", "id" => le.id, "timestamp" => 0}}
 
-      assert ^le = Pipeline.process_data(le, context, source)
-      assert ^le = Pipeline.process_data(le, context, source)
+      formatted = Formatter.format(le)
+
+      assert ^formatted = Pipeline.process_data(le, context, source)
+      assert ^formatted = Pipeline.process_data(le, context, source)
 
       {:via, Registry, {registry, key}} = schema_name
       assert [{^schema_pid, {:schema_admission, counter, 1}}] = Registry.lookup(registry, key)
@@ -1035,25 +1266,27 @@ defmodule Logflare.BigQuery.PipelineTest do
 
     test "does not crash when the passed source is nil", %{context: context} do
       le = build(:log_event)
+      formatted = Formatter.format(le)
       reject(&Schema.update/3)
 
-      assert ^le = Pipeline.process_data(le, context, nil)
+      assert ^formatted = Pipeline.process_data(le, context, nil)
     end
 
     test "always runs the schema update when the source has no schema yet, regardless of rate",
          %{user: user, context: context} do
       source = insert(:source, user_id: user.id, lock_schema: false)
       le = build(:log_event, source: source)
+      formatted = Formatter.format(le)
       test_pid = self()
 
       RateSampler.bump({source.token, :bq_schema_check}, 100_000)
 
-      expect(Schema, :update, fn _via, ^le, ^source ->
+      expect(Schema, :update, fn _via, ^formatted, ^source ->
         send(test_pid, :schema_updated)
         :ok
       end)
 
-      assert ^le = Pipeline.process_data(le, context, source)
+      assert ^formatted = Pipeline.process_data(le, context, source)
       assert_received :schema_updated
     end
 
@@ -1064,16 +1297,17 @@ defmodule Logflare.BigQuery.PipelineTest do
       source = insert(:source, user_id: user.id, lock_schema: false)
       insert(:source_schema, source: source)
       le = build(:log_event, source: source)
+      formatted = Formatter.format(le)
       test_pid = self()
 
       RateSampler.bump(source.token, 100_000)
 
-      expect(Schema, :update, fn _via, ^le, ^source ->
+      expect(Schema, :update, fn _via, ^formatted, ^source ->
         send(test_pid, :schema_updated)
         :ok
       end)
 
-      assert ^le = Pipeline.process_data(le, context, source)
+      assert ^formatted = Pipeline.process_data(le, context, source)
       assert_received :schema_updated
     end
 
