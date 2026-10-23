@@ -41,6 +41,8 @@ HTTP ingestion applies the configured parser body limit to both protobuf and JSO
 
 OTLP JSON uses hexadecimal `traceId` values (32 characters) and `spanId` / `parentSpanId` values (16 characters), including identifiers in span links and metric exemplars. Hexadecimal characters may use either case. Empty optional identifiers are accepted; malformed non-empty identifiers are rejected. `AnyValue.bytesValue` continues to use Base64 encoding.
 
+HTTP ingestion responses use the request encoding: `application/json` requests receive JSON, and `application/x-protobuf` requests receive binary protobuf. Ingestion errors use the same encoding for their Google RPC Status response.
+
 ### Configuration Examples
 
 <Tabs>
