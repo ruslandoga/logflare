@@ -31,6 +31,7 @@ jobs:
   pglogical-replica:
     name: pglogical DDL replication integration tests
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     services:
       postgres:
         image: bitnamilegacy/postgresql:15
@@ -73,22 +74,28 @@ jobs:
             deps
             _build
             priv/native
-          key: mix-v5-${{ runner.os }}-${{ steps.v.outputs.erlang }}-${{ steps.v.outputs.elixir }}-${{ github.job }}-${{ hashFiles('mix.lock', '**/Cargo.lock') }}-${{ hashFiles('mix.exs', 'Cargo.toml', 'config/**', 'lib/**', 'native/**', 'priv/**', 'test/support/**') }}
+          key: mix-${{ runner.os }}-${{ steps.v.outputs.erlang }}-${{ steps.v.outputs.elixir }}-${{ github.job }}-${{ hashFiles('mix.lock', '**/Cargo.lock') }}-${{ hashFiles('mix.exs', 'Cargo.toml', 'config/**', 'lib/**', 'native/**', 'priv/**', 'test/support/**') }}
           restore-keys: |
-            mix-v5-${{ runner.os }}-${{ steps.v.outputs.erlang }}-${{ steps.v.outputs.elixir }}-${{ github.job }}-${{ hashFiles('mix.lock', '**/Cargo.lock') }}-
-            mix-v5-${{ runner.os }}-${{ steps.v.outputs.erlang }}-${{ steps.v.outputs.elixir }}-${{ github.job }}-
+            mix-${{ runner.os }}-${{ steps.v.outputs.erlang }}-${{ steps.v.outputs.elixir }}-${{ github.job }}-${{ hashFiles('mix.lock', '**/Cargo.lock') }}-
+            mix-${{ runner.os }}-${{ steps.v.outputs.erlang }}-${{ steps.v.outputs.elixir }}-${{ github.job }}-
 
       - name: Install dependencies
-        run: mix do deps.get + deps.compile
+        run: mix 'do' deps.get + deps.loadpaths
 
       - name: Build and start pglogical primary/replica containers
         run: docker compose -f docker-compose.pglogical.yml up -d --build
 
       - name: Wait for pglogical containers to be healthy
         run: |
-          for port in 5433 5434; do
-            until docker run --rm --network host postgres:15 pg_isready -h localhost -p "$port" -U postgres; do
-              echo "Waiting for Postgres on port $port..."
+          for service in pglogical_primary pglogical_replica; do
+            for attempt in {1..30}; do
+              if docker compose -f docker-compose.pglogical.yml exec -T "$service" pg_isready -h 127.0.0.1 -p 5432 -U postgres -d logflare_test; then
+                break
+              fi
+              if [ "$attempt" -eq 30 ]; then
+                echo "::error::$service did not become ready after 30 attempts"
+                exit 1
+              fi
               sleep 2
             done
           done
@@ -97,7 +104,7 @@ jobs:
         run: mix run test/support/pglogical/bootstrap.exs
 
       - name: Create and migrate the primary application database
-        run: epmd -daemon; mix do ecto.create --quiet + ecto.migrate --quiet
+        run: epmd -daemon; mix 'do' ecto.create --quiet + ecto.migrate --quiet
 
       - name: Migrate the pglogical primary from zero with DDL replication enabled
         env:
@@ -110,7 +117,7 @@ jobs:
         run: epmd -daemon; mix ecto.migrate -r Logflare.Repo.Pglogical --quiet
 
       - name: Run pglogical DDL replication integration tests
-        run: mix test --only pglogical_replica
+        run: mix test test/integration --only pglogical_replica
 
       - name: Tear down pglogical containers
         if: always()
