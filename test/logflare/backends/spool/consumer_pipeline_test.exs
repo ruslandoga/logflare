@@ -324,6 +324,7 @@ defmodule Logflare.Backends.Spool.ConsumerPipelineTest do
                       %{count: 1}, %{reason: :unknown_source_id}}
     end
 
+    @tag capture_log: true
     test "does not fail a handle's message when only a different handle's dispatch for the same source fails" do
       source = insert(:source, user: insert(:user))
       failing_handle = "spool-handle-failing-#{System.unique_integer([:positive])}"
@@ -389,6 +390,7 @@ defmodule Logflare.Backends.Spool.ConsumerPipelineTest do
                       [:logflare, :backends, :spool, :consumer, :messages_failed], _, _}
     end
 
+    @tag capture_log: true
     test "releases a segment's bump only when it succeeds, not when dispatch fails" do
       success_handle = "spool-handle-#{System.unique_integer([:positive])}"
       failed_handle = "spool-handle-#{System.unique_integer([:positive])}"

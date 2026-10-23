@@ -114,6 +114,7 @@ defmodule LogflareWeb.QueryLiveTest do
       refute html =~ "raw backend detail"
     end
 
+    @tag capture_log: true
     test "persists a running query and restores it after a BigQuery job timeout", %{conn: conn} do
       parent = self()
       query = "SELECT current_timestamp() AS retained_value"
