@@ -29,7 +29,7 @@ defmodule LogflareWeb.ProtobufParser do
     {:next, conn}
   end
 
-  def decode({:ok, <<>>, conn}, _type) do
+  def decode({:ok, <<>>, conn}, :json) do
     {:ok, %{}, conn}
   end
 
