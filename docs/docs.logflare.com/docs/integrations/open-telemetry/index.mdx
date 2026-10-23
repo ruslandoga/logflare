@@ -65,9 +65,11 @@ A batch whose every input is rejected also returns partial success. As required 
 OTLP, exporters must not retry these responses. Fully accepted batches leave
 `partial_success` absent.
 
-These counts cover rejections after conversion. Metrics discarded by the converter
-before validation, including unsupported summaries, unset numeric values, and
-omitted staleness markers, are not currently included in partial-success counts.
+Metric data points rejected during conversion also appear in `rejected_data_points`,
+including gauge or sum points without a numeric value and unsupported summary
+points. Valid sibling points are still accepted. Metrics without data points do
+not add rejections. Points marked `NO_RECORDED_VALUE` remain intentionally omitted
+as missing observations and do not count as rejected samples.
 
 ### Configuration Examples
 
