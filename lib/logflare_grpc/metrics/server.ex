@@ -3,13 +3,11 @@ defmodule LogflareGrpc.Metrics.Server do
   GRPC Server for the Logflare Metrics Service
   """
 
-  require Logger
-
-  alias Logflare.Logs.Processor
   alias Logflare.Logs.OtelMetric
-
-  alias Opentelemetry.Proto.Collector.Metrics.V1.ExportMetricsServiceResponse
+  alias Logflare.Logs.OtlpResponse
+  alias Logflare.Logs.Processor
   alias Opentelemetry.Proto.Collector.Metrics.V1.ExportMetricsServiceRequest
+  alias Opentelemetry.Proto.Collector.Metrics.V1.ExportMetricsServiceResponse
 
   use GRPC.Server,
     service: Opentelemetry.Proto.Collector.Metrics.V1.MetricsService.Service,
@@ -19,38 +17,29 @@ defmodule LogflareGrpc.Metrics.Server do
   def export(%ExportMetricsServiceRequest{resource_metrics: metrics}, stream) do
     source = stream.local.source
 
-    case Processor.ingest(metrics, OtelMetric, source) do
-      {:error, :source_not_found} ->
-        raise GRPC.RPCError, status: :not_found, message: "Source not found."
+    response =
+      case Processor.ingest_with_report(metrics, OtelMetric, source) do
+        {:error, :source_not_found} ->
+          raise GRPC.RPCError, status: :not_found, message: "Source not found."
 
-      {:error, :source_unavailable} ->
-        raise GRPC.RPCError,
-          status: :unavailable,
-          message: "Source is unavailable. Send the batch again."
+        {:error, :source_unavailable} ->
+          raise GRPC.RPCError,
+            status: :unavailable,
+            message: "Source is unavailable. Send the batch again."
 
-      {:error, :spool_unavailable} ->
-        raise GRPC.RPCError,
-          status: :unavailable,
-          message: "Ingest spool is unavailable. Send the batch again."
+        {:error, :spool_unavailable} ->
+          raise GRPC.RPCError,
+            status: :unavailable,
+            message: "Ingest spool is unavailable. Send the batch again."
 
-      {:error, errors} when is_list(errors) ->
-        Logger.warning("OTLP gRPC ingest rejected #{length(errors)} event(s) at validation",
-          source_token: source.token,
-          source_id: source.id,
-          sample_errors: errors |> Enum.uniq() |> Enum.take(3)
-        )
+        {:ok, report} ->
+          OtlpResponse.from_report(%ExportMetricsServiceResponse{}, report, source)
 
-      {:ok, _count} ->
-        :ok
-
-      :ok ->
-        :ok
-
-      _unexpected ->
-        raise GRPC.RPCError, status: :internal, message: "Internal server error."
-    end
+        _unexpected ->
+          raise GRPC.RPCError, status: :internal, message: "Internal server error."
+      end
 
     GRPC.Server.set_trailers(stream, %{"grpc-status" => "0"})
-    %ExportMetricsServiceResponse{}
+    response
   end
 end

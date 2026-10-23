@@ -13,7 +13,10 @@ defmodule LogflareWeb.OtlpHttpSpoolRetryTest do
 
   test "each OTLP signal reports a retryable failure when the spool is unavailable" do
     stub(Backends, :start_for_ingest, fn _source -> :ok end)
-    stub(Backends, :ingest_logs, fn [], _source, nil, true -> {:error, :spool_unavailable} end)
+
+    stub(Backends, :ingest_logs_with_rejections, fn [], _source, nil, true ->
+      {:error, :spool_unavailable}
+    end)
 
     for {action, request} <- [
           {:otel_logs, ExportLogsServiceRequest},

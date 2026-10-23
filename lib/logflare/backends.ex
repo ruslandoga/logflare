@@ -639,6 +639,11 @@ defmodule Logflare.Backends do
   instead.
   """
   @type log_param :: map()
+  @type ingest_report :: %{
+          accepted: non_neg_integer(),
+          rejections: [{non_neg_integer(), String.t()}]
+        }
+
   @spec ingest_logs([log_param()], Source.t()) ::
           {:ok, count :: pos_integer()} | {:error, term()}
   @spec ingest_logs([log_param()], Source.t(), Backend.t() | nil) ::
@@ -647,7 +652,21 @@ defmodule Logflare.Backends do
           {:ok, count :: pos_integer()} | {:error, term()}
   def ingest_logs(event_params, source, backend \\ nil, allow_spooling \\ false) do
     with :ok <- start_for_ingest(source) do
-      do_ingest_logs(event_params, source, backend, allow_spooling)
+      do_ingest_logs(event_params, source, backend, allow_spooling, :legacy)
+    end
+  end
+
+  @doc """
+  Ingests events and reports validation rejections by their zero-based input index.
+
+  Dispatch failures remain errors. Rejection indices are returned separately from
+  event bodies and are never written to storage.
+  """
+  @spec ingest_logs_with_rejections([log_param()], Source.t(), Backend.t() | nil, boolean()) ::
+          {:ok, ingest_report()} | {:error, term()}
+  def ingest_logs_with_rejections(event_params, source, backend, allow_spooling) do
+    with :ok <- start_for_ingest(source) do
+      do_ingest_logs(event_params, source, backend, allow_spooling, :report)
     end
   end
 
@@ -666,15 +685,27 @@ defmodule Logflare.Backends do
     end
   end
 
-  defp do_ingest_logs(event_params, source, backend, allow_spooling) do
-    {log_events, errors} = split_valid_events(source, event_params)
+  @spec do_ingest_logs([log_param()], Source.t(), Backend.t() | nil, boolean(), :legacy | :report) ::
+          {:ok, non_neg_integer() | ingest_report()} | {:error, term()}
+  defp do_ingest_logs(event_params, source, backend, allow_spooling, result_format) do
+    {log_events, rejections} = split_valid_events(source, event_params, result_format)
     count = Enum.count(log_events)
     increment_counters(source, count)
 
     with :ok <- dispatch_logs(source, backend, log_events, allow_spooling) do
-      if Enum.empty?(errors), do: {:ok, count}, else: {:error, errors}
+      ingest_result(count, rejections, result_format)
     end
   end
+
+  @spec ingest_result(non_neg_integer(), [{non_neg_integer(), String.t()}], :legacy | :report) ::
+          {:ok, non_neg_integer() | ingest_report()} | {:error, [String.t()]}
+  defp ingest_result(count, [], :legacy), do: {:ok, count}
+
+  defp ingest_result(_count, rejections, :legacy),
+    do: {:error, Enum.map(rejections, fn {_index, message} -> message end)}
+
+  defp ingest_result(count, rejections, :report),
+    do: {:ok, %{accepted: count, rejections: Enum.reverse(rejections)}}
 
   defp dispatch_logs(source, backend, log_events, allow_spooling) do
     if spoolable?(log_events, source, allow_spooling) do
@@ -802,7 +833,9 @@ defmodule Logflare.Backends do
     {:ok, count}
   end
 
-  defp split_valid_events(source, event_params) do
+  @spec split_valid_events(Source.t(), [log_param()], :legacy | :report) ::
+          {[LogEvent.t()], [{non_neg_integer(), String.t()}]}
+  defp split_valid_events(source, event_params, result_format) do
     max_allowed = System.system_time(:microsecond) + @max_future_event_us
 
     {events, errors, total, tally} =
@@ -813,9 +846,11 @@ defmodule Logflare.Backends do
               {events, errors, total + 1, bump(tally, :drop_lql)}
 
             %{pipeline_error: %_{message: message}, valid: false} ->
-              {events, [message | errors], total + 1, bump(tally, :rejected)}
+              {events, [{total, message} | errors], total + 1, bump(tally, :rejected)}
 
             %{body: %{"timestamp" => timestamp}} when timestamp > max_allowed ->
+              errors = record_future_rejection(errors, total, result_format)
+
               {events, errors, total + 1, bump(tally, :drop_future)}
 
             le ->
@@ -838,6 +873,16 @@ defmodule Logflare.Backends do
 
     {events, errors}
   end
+
+  @spec record_future_rejection(
+          [{non_neg_integer(), String.t()}],
+          non_neg_integer(),
+          :legacy | :report
+        ) :: [{non_neg_integer(), String.t()}]
+  defp record_future_rejection(errors, _index, :legacy), do: errors
+
+  defp record_future_rejection(errors, index, :report),
+    do: [{index, "Timestamp is more than one hour in the future."} | errors]
 
   @spec param_to_log_event(LogEvent.t() | map(), Source.t()) :: LogEvent.t()
   defp param_to_log_event(%LogEvent{source_id: nil} = le, source) do

@@ -133,16 +133,21 @@ defmodule LogflareWeb.LogControllerTest do
           {:otel_traces, ExportTraceServiceRequest, ExportTraceServiceResponse},
           {:otel_logs, ExportLogsServiceRequest, ExportLogsServiceResponse}
         ] do
-      test "#{path} returns 200 (not 500) when validation rejects events", %{
+      test "#{path} reports partial success when validation rejects input units", %{
         conn: conn,
         source: source,
         user: user
       } do
-        Mimic.stub(Logflare.Backends, :ingest_logs, fn _batch,
-                                                       _source,
-                                                       _backend,
-                                                       _allow_spooling ->
-          {:error, ["Type error! Field `value` has an unexpected type."]}
+        Mimic.stub(Logflare.Backends, :ingest_logs_with_rejections, fn batch,
+                                                                       _source,
+                                                                       _backend,
+                                                                       true ->
+          indices = if unquote(path) == :otel_traces, do: [0, 1], else: [0]
+
+          rejections =
+            Enum.map(indices, &{&1, "Type error! Field `value` has an unexpected type."})
+
+          {:ok, %{accepted: length(batch) - length(indices), rejections: rejections}}
         end)
 
         body =
@@ -162,8 +167,17 @@ defmodule LogflareWeb.LogControllerTest do
               |> put_req_header("content-type", "application/x-protobuf")
               |> post(Routes.log_path(conn, unquote(path)), body)
 
-            assert protobuf_response(conn, 200, unquote(response_module)) ==
-                     struct!(unquote(response_module), partial_success: nil)
+            response = protobuf_response(conn, 200, unquote(response_module))
+            assert response.partial_success.error_message =~ "unexpected type"
+
+            count_field =
+              case unquote(path) do
+                :otel_logs -> :rejected_log_records
+                :otel_metrics -> :rejected_data_points
+                :otel_traces -> :rejected_spans
+              end
+
+            assert Map.fetch!(response.partial_success, count_field) == 1
           end)
 
         assert log =~ "OTLP ingest rejected"
@@ -243,10 +257,10 @@ defmodule LogflareWeb.LogControllerTest do
         source: source,
         user: user
       } do
-        Mimic.stub(Logflare.Backends, :ingest_logs, fn _batch,
-                                                       _source,
-                                                       _backend,
-                                                       _allow_spooling ->
+        Mimic.stub(Logflare.Backends, :ingest_logs_with_rejections, fn _batch,
+                                                                       _source,
+                                                                       _backend,
+                                                                       _allow_spooling ->
           {:error, :spool_unavailable}
         end)
 
@@ -279,7 +293,7 @@ defmodule LogflareWeb.LogControllerTest do
         {:error, :source_unavailable}
       end)
 
-      Mimic.reject(Logflare.Backends, :ingest_logs, 4)
+      Mimic.reject(Logflare.Backends, :ingest_logs_with_rejections, 4)
 
       conn =
         conn

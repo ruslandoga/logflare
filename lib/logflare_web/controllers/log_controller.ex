@@ -6,6 +6,7 @@ defmodule LogflareWeb.LogController do
 
   alias Logflare.Backends
   alias Logflare.Logs
+  alias Logflare.Logs.OtlpResponse
   alias Logflare.Logs.Processor
   alias Opentelemetry.Proto.Collector.Trace.V1.ExportTraceServiceRequest
   alias Opentelemetry.Proto.Collector.Trace.V1.ExportTraceServiceResponse
@@ -360,7 +361,7 @@ defmodule LogflareWeb.LogController do
         %ExportTraceServiceRequest{resource_spans: resource_spans}
       ) do
     resource_spans
-    |> Processor.ingest(Logs.OtelTrace, source)
+    |> Processor.ingest_with_report(Logs.OtelTrace, source)
     |> protobuf_response(conn, %ExportTraceServiceResponse{})
   rescue
     exception ->
@@ -375,7 +376,7 @@ defmodule LogflareWeb.LogController do
         %ExportMetricsServiceRequest{resource_metrics: resource_metrics}
       ) do
     resource_metrics
-    |> Processor.ingest(Logs.OtelMetric, source)
+    |> Processor.ingest_with_report(Logs.OtelMetric, source)
     |> protobuf_response(conn, %ExportMetricsServiceResponse{})
   rescue
     exception ->
@@ -390,12 +391,17 @@ defmodule LogflareWeb.LogController do
         %ExportLogsServiceRequest{resource_logs: resource_logs}
       ) do
     resource_logs
-    |> Processor.ingest(Logs.OtelLog, source)
+    |> Processor.ingest_with_report(Logs.OtelLog, source)
     |> protobuf_response(conn, %ExportLogsServiceResponse{})
   rescue
     exception ->
       send_proto_error(conn, 500, "Internal server error")
       reraise exception, __STACKTRACE__
+  end
+
+  defp protobuf_response({:ok, report}, conn, success_response) when is_map(report) do
+    response = OtlpResponse.from_report(success_response, report, conn.assigns.source)
+    send_proto_resp(conn, response)
   end
 
   defp protobuf_response({:error, :source_not_found}, conn, _success_response) do

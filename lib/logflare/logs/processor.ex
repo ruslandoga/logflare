@@ -8,7 +8,10 @@ defmodule Logflare.Logs.Processor do
   """
 
   alias Logflare.Backends
+  alias Logflare.Logs.OtelTrace
   alias Logflare.Sources.Source
+
+  @type ingest_report :: %{rejected: non_neg_integer(), errors: [String.t()]}
 
   @doc """
   Translate `data` into format that will be used for storage.
@@ -33,11 +36,29 @@ defmodule Logflare.Logs.Processor do
   def ingest(data, processor, %Source{} = source)
       when is_list(data) and is_atom(processor) do
     with :ok <- Backends.start_for_ingest(source) do
-      process_and_store(data, processor, source)
+      process_and_store(data, processor, source, :legacy)
     end
   end
 
-  defp process_and_store(data, processor, source) do
+  @doc """
+  Processes OTLP data and reports rejected input records, data points, or spans.
+
+  A span and its derived standalone event records are one input unit. If any of
+  those records fails validation, the original span is counted once, even when
+  multiple records fail. Repeated trace/span IDs remain distinct input spans.
+  """
+  @spec ingest_with_report([map()], module(), Source.t()) ::
+          {:ok, ingest_report()} | {:error, term()}
+  def ingest_with_report(data, processor, %Source{} = source)
+      when is_list(data) and is_atom(processor) do
+    with :ok <- Backends.start_for_ingest(source) do
+      process_and_store(data, processor, source, :report)
+    end
+  end
+
+  @spec process_and_store([map()], module(), Source.t(), :legacy | :report) ::
+          {:ok, non_neg_integer() | ingest_report()} | {:error, term()}
+  defp process_and_store(data, processor, source, result_format) do
     metadata = %{
       processor: processor,
       source_token: source.token,
@@ -63,7 +84,7 @@ defmodule Logflare.Logs.Processor do
         # point (every log_controller.ex/gRPC ingestion action funnels
         # through here), as opposed to SourceRouter's re-entrant calls,
         # which never pass this and so can never be spooled.
-        result = Backends.ingest_logs(batch, source, nil, true)
+        result = store_batch(batch, processor, source, result_format)
 
         new_meta = Map.merge(metadata, %{success: elem(result, 0) == :ok})
 
@@ -71,4 +92,44 @@ defmodule Logflare.Logs.Processor do
       end)
     end)
   end
+
+  @spec store_batch([map()], module(), Source.t(), :legacy | :report) ::
+          {:ok, non_neg_integer() | ingest_report()} | {:error, term()}
+  defp store_batch(batch, _processor, source, :legacy),
+    do: Backends.ingest_logs(batch, source, nil, true)
+
+  defp store_batch(batch, processor, source, :report) do
+    with {:ok, %{rejections: rejections}} <-
+           Backends.ingest_logs_with_rejections(batch, source, nil, true) do
+      {:ok,
+       %{
+         rejected: rejected_units(batch, processor, rejections),
+         errors: Enum.map(rejections, fn {_index, message} -> message end)
+       }}
+    end
+  end
+
+  @spec rejected_units([map()], module(), [{non_neg_integer(), String.t()}]) :: non_neg_integer()
+  defp rejected_units(batch, OtelTrace, rejections) do
+    rejected_indices = MapSet.new(rejections, fn {index, _message} -> index end)
+
+    {rejected_spans, _span_index} =
+      batch
+      |> Enum.with_index()
+      |> Enum.reduce({MapSet.new(), -1}, fn {event, index}, {rejected_spans, span_index} ->
+        span_index =
+          if get_in(event, ["metadata", "type"]) == "span", do: span_index + 1, else: span_index
+
+        rejected_spans =
+          if MapSet.member?(rejected_indices, index),
+            do: MapSet.put(rejected_spans, span_index),
+            else: rejected_spans
+
+        {rejected_spans, span_index}
+      end)
+
+    MapSet.size(rejected_spans)
+  end
+
+  defp rejected_units(_batch, _processor, rejections), do: length(rejections)
 end

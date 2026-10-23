@@ -51,6 +51,24 @@ When the source cannot start or the ingest spool is unavailable, OTLP/gRPC retur
 `UNAVAILABLE`. Exporters should retry the batch with backoff. An unexpected ingest
 failure returns `INTERNAL` instead of a successful acknowledgement.
 
+### Validation responses
+
+OTLP/HTTP and OTLP/gRPC responses include `partial_success` when validation rejects
+telemetry. The response reports the number of rejected log records, metric data
+points, or spans, plus an error message. A span counts once if either its span
+record or any derived event record fails validation, even when several records
+from that span fail. Events with timestamps more than one hour in the future
+are included in the rejected count. Source rules that intentionally filter events
+do not count as validation rejections.
+
+A batch whose every input is rejected also returns partial success. As required by
+OTLP, exporters must not retry these responses. Fully accepted batches leave
+`partial_success` absent.
+
+These counts cover rejections after conversion. Metrics discarded by the converter
+before validation, including unsupported summaries, unset numeric values, and
+omitted staleness markers, are not currently included in partial-success counts.
+
 ### Configuration Examples
 
 <Tabs>
