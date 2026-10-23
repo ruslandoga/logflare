@@ -35,6 +35,8 @@ counts of dropped attributes, events, and links. Status codes are stored as
 records, whose `trace_flags` contain the containing span's W3C trace flag bits.
 Resource and scope schema URLs are kept separately from user-supplied attributes.
 
+An empty HTTP/protobuf body represents an empty batch. It follows the same authentication and source checks as a non-empty request.
+
 ### Configuration Examples
 
 <Tabs>
