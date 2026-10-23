@@ -356,6 +356,18 @@ defmodule Logflare.Backends.Adaptor.PostgresAdaptorTest do
 
       backend = insert(:backend, type: :postgres, sources: [source], config: config)
       log_event = build(:log_event, source: source, test: "data")
+      repo_name = RepoSupervisor.via(backend)
+
+      stub(SharedRepo, :start_link, fn opts ->
+        opts =
+          if opts[:name] == repo_name do
+            Keyword.merge(opts, queue_target: 10, queue_interval: 100)
+          else
+            opts
+          end
+
+        Mimic.call_original(SharedRepo, :start_link, [opts])
+      end)
 
       log =
         capture_log(fn ->
