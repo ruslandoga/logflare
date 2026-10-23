@@ -30,8 +30,12 @@ defmodule Logflare.Logs.Otel do
 
   By convention, that's the service name.
   """
+  @spec resource_project(map()) :: term()
   def resource_project(handled_resource) when is_non_struct_map(handled_resource) do
-    handled_resource["service"]["name"] || handled_resource["service.name"]
+    case handled_resource["service"] do
+      %{} = service -> service["name"] || handled_resource["service.name"]
+      _ -> handled_resource["service.name"]
+    end
   end
 
   @doc """
