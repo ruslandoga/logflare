@@ -153,3 +153,9 @@ docker compose -f docker-compose.yml -f docker-compose.pg.yml -f docker-compose.
 - Metric exemplars retain their values, timestamps, filtered attributes, and hexadecimal trace and span IDs. Exemplars without a value are omitted.
 
 - Non-finite metric numbers are stored as the JSON-compatible strings `NaN`, `Infinity`, and `-Infinity`; finite numbers and absent optional fields retain their original values.
+
+### Timestamp precision
+
+OTLP timestamps use nanoseconds regardless of the number of digits. Logflare stores its event timestamp in microseconds and retains supplied nanoseconds in `time_unix_nano`, with `start_time_unix_nano` and `end_time_unix_nano` retained where applicable. Logs with no event time use their observed time; missing times otherwise use the ingestion time.
+
+The default ClickHouse mapping prefers the original nanoseconds. Its signed 64-bit `DateTime64(9)` columns saturate at `9223372036854775807` for later OTLP timestamps; the original unsigned value remains in the event body. NDJSON output intentionally emits microseconds, including unsigned timestamps beyond the ClickHouse nanosecond range.

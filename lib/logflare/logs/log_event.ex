@@ -510,6 +510,17 @@ defmodule Logflare.LogEvent do
   end
 
   @spec determine_timestamp(map()) :: {integer(), boolean()}
+  defp determine_timestamp(%{"time_unix_nano" => timestamp}) when is_pos_integer(timestamp),
+    do: {div(timestamp, 1_000), false}
+
+  defp determine_timestamp(%{"time_unix_nano" => timestamp} = params)
+       when timestamp in [nil, 0] do
+    case params["observed_time_unix_nano"] do
+      observed when is_pos_integer(observed) -> {div(observed, 1_000), false}
+      _ -> {default_timestamp(), true}
+    end
+  end
+
   defp determine_timestamp(params) when not is_map_key(params, "timestamp"),
     do: {default_timestamp(), true}
 
@@ -548,16 +559,16 @@ defmodule Logflare.LogEvent do
   defp maybe_use_trace_start_time(result, _event_type, _params), do: result
 
   @spec extract_trace_start_time(params :: map()) :: pos_integer() | nil
+  defp extract_trace_start_time(%{"start_time_unix_nano" => n}) when is_pos_integer(n),
+    do: div(n, 1_000)
+
+  defp extract_trace_start_time(%{"startTimeUnixNano" => n}) when is_pos_integer(n),
+    do: div(n, 1_000)
+
   defp extract_trace_start_time(%{"start_time" => n}) when is_pos_integer(n),
     do: Utils.to_microseconds(n)
 
   defp extract_trace_start_time(%{"startTime" => n}) when is_pos_integer(n),
-    do: Utils.to_microseconds(n)
-
-  defp extract_trace_start_time(%{"start_time_unix_nano" => n}) when is_pos_integer(n),
-    do: Utils.to_microseconds(n)
-
-  defp extract_trace_start_time(%{"startTimeUnixNano" => n}) when is_pos_integer(n),
     do: Utils.to_microseconds(n)
 
   defp extract_trace_start_time(_params), do: nil

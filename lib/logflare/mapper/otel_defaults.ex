@@ -57,9 +57,9 @@ defmodule Logflare.Mapper.OtelDefaults do
 
   @type output_format() :: :ch_row_binary | :ndjson | :map
 
-  @log_config_id "00000000-0000-0000-0001-000000000006"
-  @metric_config_id "00000000-0000-0000-0002-000000000006"
-  @trace_config_id "00000000-0000-0000-0003-000000000006"
+  @log_config_id "00000000-0000-0000-0001-000000000007"
+  @metric_config_id "00000000-0000-0000-0002-000000000007"
+  @trace_config_id "00000000-0000-0000-0003-000000000007"
 
   @attributes_exclude_keys ["id", "event_message", "source", "timestamp"]
 
@@ -200,7 +200,10 @@ defmodule Logflare.Mapper.OtelDefaults do
         exclude_keys: @attributes_exclude_keys ++ ["resource", "scope"],
         elevate_keys: ["metadata", "attributes"]
       ),
-      Field.datetime64("timestamp", path: "$.timestamp", precision: 9)
+      Field.datetime64("timestamp",
+        paths: ["$.time_unix_nano", "$.observed_time_unix_nano", "$.timestamp"],
+        precision: 9
+      )
     ]
 
     MappingConfig.new(fields, output: OutputFormat.ch_row_binary(:log))
@@ -425,7 +428,7 @@ defmodule Logflare.Mapper.OtelDefaults do
         ],
         precision: 9
       ),
-      Field.datetime64("timestamp", path: "$.timestamp", precision: 9)
+      Field.datetime64("timestamp", paths: ["$.time_unix_nano", "$.timestamp"], precision: 9)
     ]
 
     MappingConfig.new(fields, output: OutputFormat.ch_row_binary(:metric))
@@ -494,19 +497,19 @@ defmodule Logflare.Mapper.OtelDefaults do
       ),
       Field.datetime64("start_time",
         paths: [
-          "$.start_time",
-          "$.startTime",
           "$.start_time_unix_nano",
-          "$.startTimeUnixNano"
+          "$.startTimeUnixNano",
+          "$.start_time",
+          "$.startTime"
         ],
         precision: 9
       ),
       Field.datetime64("end_time",
         paths: [
-          "$.end_time",
-          "$.endTime",
           "$.end_time_unix_nano",
-          "$.endTimeUnixNano"
+          "$.endTimeUnixNano",
+          "$.end_time",
+          "$.endTime"
         ],
         precision: 9
       ),
@@ -567,7 +570,7 @@ defmodule Logflare.Mapper.OtelDefaults do
       Field.array_flat_map("links.attributes",
         path: "$.links[*].attributes"
       ),
-      Field.datetime64("timestamp", path: "$.timestamp", precision: 9)
+      Field.datetime64("timestamp", paths: ["$.time_unix_nano", "$.timestamp"], precision: 9)
     ]
 
     MappingConfig.new(fields, output: OutputFormat.ch_row_binary(:trace))

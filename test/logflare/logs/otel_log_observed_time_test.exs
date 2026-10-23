@@ -19,7 +19,7 @@ defmodule Logflare.Logs.OtelLogObservedTimeTest do
   test "missing timestamps allow receiver time inference" do
     event = convert(%LogRecord{})
     refute Map.has_key?(event, "timestamp")
-    assert event["observed_time_unix_nano"] == 0
+    assert event["observed_time_unix_nano"] == nil
   end
 
   @spec convert(LogRecord.t()) :: map()

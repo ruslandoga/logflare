@@ -454,9 +454,19 @@ fn coerce_enum8<'a>(env: Env<'a>, value: Term<'a>) -> Term<'a> {
 }
 
 fn coerce_datetime64<'a>(env: Env<'a>, value: Term<'a>, precision: u8) -> Term<'a> {
+    let (value, explicit_precision) = match value.decode::<(Term<'a>, u8)>() {
+        Ok((value, 9)) => (value, Some(9)),
+        _ => (value, None),
+    };
+
     if let Ok(i) = value.decode::<i64>() {
-        let source_precision = detect_precision(i);
+        let source_precision = explicit_precision.unwrap_or_else(|| detect_precision(i));
         return scale(i, source_precision, precision).encode(env);
+    }
+
+    if let Ok(nanos) = value.decode::<u64>() {
+        let scaled = nanos / 10u64.pow(u32::from(9 - precision));
+        return i64::try_from(scaled).unwrap_or(i64::MAX).encode(env);
     }
 
     if let Ok(binary) = value.decode::<Binary>() {
