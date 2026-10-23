@@ -8,7 +8,9 @@ defmodule Logflare.Backends.Adaptor.SyslogAdaptor.Pipeline do
   alias Logflare.Backends
   alias Logflare.Backends.Adaptor.SyslogAdaptor.{Pool, Syslog}
 
+  @spec start_link(keyword()) :: Broadway.on_start()
   def start_link(opts) do
+    opts = Keyword.merge(Application.get_env(:logflare, __MODULE__, []), opts)
     backend = Keyword.fetch!(opts, :backend)
     source = Keyword.fetch!(opts, :source)
     pool = Keyword.fetch!(opts, :pool)
@@ -17,14 +19,22 @@ defmodule Logflare.Backends.Adaptor.SyslogAdaptor.Pipeline do
     Broadway.start_link(__MODULE__,
       name: name,
       producer: [
-        module: {Backends.BufferProducer, backend_id: backend.id, source_id: source.id},
+        module:
+          {Backends.BufferProducer,
+           backend_id: backend.id,
+           source_id: source.id,
+           interval: Keyword.get(opts, :producer_interval, 1_000)},
         transformer: {__MODULE__, :transform, []}
       ],
       processors: [
         default: [min_demand: 1]
       ],
       batchers: [
-        syslog: [concurrency: 5, batch_size: 50]
+        syslog: [
+          concurrency: 5,
+          batch_size: 50,
+          batch_timeout: Keyword.get(opts, :batch_timeout, 1_000)
+        ]
       ],
       context: %{
         source_id: source.id,
