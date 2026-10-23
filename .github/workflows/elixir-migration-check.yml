@@ -7,32 +7,17 @@ on:
     paths:
       - "priv/repo/migrations/**"
       - "mix.exs"
+      - ".tool-versions"
+      - ".github/workflows/elixir-migration-check.yml"
       - "lib/logflare/ecto/adapters/pglogical_postgres.ex"
 
 permissions:
   contents: read
 
 jobs:
-  versions:
-    name: Get versions
-    runs-on: ubuntu-latest
-    outputs:
-      elixir: ${{ steps.v.outputs.elixir }}
-      erlang: ${{ steps.v.outputs.erlang }}
-      rust: ${{ steps.v.outputs.rust }}
-    steps:
-      - uses: actions/checkout@v6
-      - name: Read versions from .tool-versions
-        id: v
-        run: |
-          echo "elixir=$(grep '^elixir '  .tool-versions | awk '{print $2}')" >> "$GITHUB_OUTPUT"
-          echo "erlang=$(grep '^erlang '  .tool-versions | awk '{print $2}')" >> "$GITHUB_OUTPUT"
-          echo "rust=$(grep   '^rust '    .tool-versions | awk '{print $2}')" >> "$GITHUB_OUTPUT"
-
   build:
     name: Build and test
     runs-on: ubuntu-latest
-    needs: versions
     services:
       postgres:
         image: bitnamilegacy/postgresql:15
@@ -84,6 +69,10 @@ jobs:
       - name: Start Telegraf
         run: docker compose up -d telegraf
 
+      - name: Read Rust version
+        id: rust
+        run: echo "version=$(awk '$1 == "rust" {print $2}' .tool-versions)" >> "$GITHUB_OUTPUT"
+
       - name: Set up Elixir
         uses: erlef/setup-beam@v1
         with:
@@ -93,30 +82,30 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@v1
         with:
-          toolchain: ${{ needs.versions.outputs.rust }}
+          toolchain: ${{ steps.rust.outputs.version }}
 
-      - name: Restore Cargo cache
-        uses: actions/cache@v5
-        with:
-          path: |
-            ~/.cargo
-            target
-          key: cargo-${{ runner.os }}-${{ needs.versions.outputs.rust }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            cargo-${{ runner.os }}-${{ needs.versions.outputs.rust }}-
-            cargo-${{ runner.os }}-
-
-      - name: Restore Mix cache
+      - name: Cache Mix build
         uses: actions/cache@v5
         with:
           path: |
             deps
             _build
             priv/native
-          key: mix-v3-${{ runner.os }}-${{ needs.versions.outputs.erlang }}-${{ needs.versions.outputs.elixir }}-${{ hashFiles('mix.lock', '**/Cargo.lock', 'native/**') }}
+          key: mix-${{ runner.os }}-${{ runner.arch }}-${{ env.MIX_ENV }}-unit-${{ hashFiles('.tool-versions') }}-${{ hashFiles('mix.lock', 'Cargo.lock') }}-${{ hashFiles('mix.exs', 'VERSION', 'Cargo.toml', 'config/**', 'lib/**', 'native/**', 'priv/**', 'test/support/**', 'docs/docs.logflare.com/docs/**') }}
           restore-keys: |
-            mix-v3-${{ runner.os }}-${{ needs.versions.outputs.erlang }}-${{ needs.versions.outputs.elixir }}-
-            mix-v3-${{ runner.os }}-${{ needs.versions.outputs.erlang }}-
+            mix-${{ runner.os }}-${{ runner.arch }}-${{ env.MIX_ENV }}-unit-${{ hashFiles('.tool-versions') }}-${{ hashFiles('mix.lock', 'Cargo.lock') }}-
+            mix-${{ runner.os }}-${{ runner.arch }}-${{ env.MIX_ENV }}-unit-${{ hashFiles('.tool-versions') }}-
+
+      - name: Cache Cargo build
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo
+            target
+          key: cargo-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.tool-versions') }}-elixir-${{ hashFiles('Cargo.lock') }}-${{ hashFiles('Cargo.toml', 'native/**', '!native/**/target/**') }}
+          restore-keys: |
+            cargo-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.tool-versions') }}-elixir-${{ hashFiles('Cargo.lock') }}-
+            cargo-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.tool-versions') }}-elixir-
 
       - name: Prepare in-app docs
         run: |
