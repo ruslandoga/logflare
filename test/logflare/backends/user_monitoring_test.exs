@@ -31,13 +31,13 @@ defmodule Logflare.Backends.UserMonitoringTest do
     [source: source, source_b: source_b, user: user]
   end
 
-  def start_user_monitoring_pipeline(_context) do
+  @spec setup_user_monitoring_exporter(map()) :: keyword()
+  def setup_user_monitoring_exporter(_context) do
     start_supervised!(AllLogsLogged)
+    [exporter_spec, pipeline_spec] = UserMonitoring.get_otel_exporter()
+    start_supervised!(exporter_spec)
 
-    UserMonitoring.get_otel_exporter()
-    |> Enum.each(&start_supervised!/1)
-
-    :ok
+    [monitoring_pipeline: pipeline_spec]
   end
 
   describe "logs" do
@@ -329,14 +329,16 @@ defmodule Logflare.Backends.UserMonitoringTest do
   defp invalid_query_error_log_event?(_event), do: false
 
   describe "system monitoring labels" do
-    setup :start_user_monitoring_pipeline
+    setup :setup_user_monitoring_exporter
 
     setup do
       insert(:plan)
       :ok
     end
 
-    test "backends.ingest.ingested_bytes and backends.ingest.ingested_count" do
+    test "backends.ingest.ingested_bytes and backends.ingest.ingested_count", %{
+      monitoring_pipeline: monitoring_pipeline
+    } do
       GoogleApi.BigQuery.V2.Api.Tabledata
       |> stub(:bigquery_tabledata_insert_all, fn _conn,
                                                  _project_id,
@@ -350,9 +352,13 @@ defmodule Logflare.Backends.UserMonitoringTest do
         insert(:user, system_monitoring: true)
 
       source = insert(:source, user: user, labels: "my_label=m.value")
-      metrics_source = insert(:source, user: user, system_source_type: :metrics)
+
+      metrics_source =
+        insert(:source, user: user, system_source: true, system_source_type: :metrics)
+
       start_supervised!({SourceSup, metrics_source}, id: :metrics_source)
       start_supervised!({SourceSup, source}, id: :source)
+      start_supervised!(monitoring_pipeline)
 
       assert {:ok, _} = Backends.ingest_logs([%{"metadata" => %{"value" => "test"}}], source)
 
@@ -403,7 +409,7 @@ defmodule Logflare.Backends.UserMonitoringTest do
       end)
     end
 
-    test "other users metrics" do
+    test "other users metrics", %{monitoring_pipeline: monitoring_pipeline} do
       pid = self()
       test_ref = make_ref()
 
@@ -417,12 +423,17 @@ defmodule Logflare.Backends.UserMonitoringTest do
 
       other_source = insert(:source, user: other_user, labels: "my_label=m.value")
 
-      metrics_source = insert(:source, user: user, system_source_type: :metrics)
-      other_metrics_source = insert(:source, user: other_user, system_source_type: :metrics)
+      metrics_source =
+        insert(:source, user: user, system_source: true, system_source_type: :metrics)
+
+      other_metrics_source =
+        insert(:source, user: other_user, system_source: true, system_source_type: :metrics)
+
       start_supervised!({SourceSup, source}, id: :source)
       start_supervised!({SourceSup, other_source}, id: :other_source)
       start_supervised!({SourceSup, metrics_source}, id: :metrics_source)
       start_supervised!({SourceSup, other_metrics_source}, id: :other_metrics_source)
+      start_supervised!(monitoring_pipeline)
 
       GoogleApi.BigQuery.V2.Api.Tabledata
       |> stub(:bigquery_tabledata_insert_all, fn _conn,
@@ -460,9 +471,6 @@ defmodule Logflare.Backends.UserMonitoringTest do
       assert {:ok, _} =
                Backends.ingest_logs([%{"metadata" => %{"value" => "different"}}], other_source)
 
-      # Pipeline #1 has flushed and emitted telemetry. Remaining latency before
-      # the stub fires is one OtelMetricExporter tick (≤100ms in :test) plus
-      # pipeline #2's batch_timeout (~1.5s).
       assert_receive {^test_ref, :ingest_emitted}, 10_000
 
       source_id = source.id
@@ -483,7 +491,7 @@ defmodule Logflare.Backends.UserMonitoringTest do
   end
 
   describe "egress" do
-    setup :start_user_monitoring_pipeline
+    setup :setup_user_monitoring_exporter
     setup :set_mimic_global
 
     setup do
@@ -492,17 +500,24 @@ defmodule Logflare.Backends.UserMonitoringTest do
       :ok
     end
 
-    test "backends.ingest.egress.request_bytes includes backend metadata" do
+    test "backends.ingest.egress.request_bytes includes backend metadata", %{
+      monitoring_pipeline: monitoring_pipeline
+    } do
       pid = self()
 
       GoogleApi.BigQuery.V2.Api.Tabledata
       |> stub(:bigquery_tabledata_insert_all, fn _, _, _, _, opts ->
-        send(pid, {:insert_all, opts[:body].rows})
+        for %{json: %{"event_message" => "logflare.backends.ingest.egress.request_bytes"} = row} <-
+              opts[:body].rows,
+            do: send(pid, {:egress_metric, row})
+
         {:ok, %GoogleApi.BigQuery.V2.Model.TableDataInsertAllResponse{insertErrors: nil}}
       end)
 
       user = insert(:user, system_monitoring: true)
-      metrics_source = insert(:source, user: user, system_source_type: :metrics)
+
+      metrics_source =
+        insert(:source, user: user, system_source: true, system_source_type: :metrics)
 
       webhook_backend =
         insert(:backend,
@@ -516,25 +531,14 @@ defmodule Logflare.Backends.UserMonitoringTest do
 
       start_supervised!({SourceSup, metrics_source}, id: :metrics_source)
       start_supervised!({SourceSup, source}, id: :source)
+      start_supervised!(monitoring_pipeline)
 
       {:ok, _} = Backends.update_source_backends(source, [webhook_backend])
       Backends.Cache.get_backend(webhook_backend.id)
 
       assert {:ok, _} = Backends.ingest_logs([%{"message" => "test webhook egress"}], source)
 
-      assert_receive {:insert_all, [%{json: %{"attributes" => _}} | _] = rows}, 15_000
-
-      rows = for row <- rows, do: row.json
-
-      egress_row =
-        Enum.find(
-          rows,
-          &match?(%{"event_message" => "logflare.backends.ingest.egress.request_bytes"}, &1)
-        )
-
-      assert egress_row, "Expected egress metric to be present"
-
-      [attributes] = egress_row["attributes"]
+      assert_receive {:egress_metric, %{"attributes" => [attributes]}}, to_timeout(second: 15)
 
       assert attributes["source_id"] == source.id
       assert attributes["user_id"] == user.id
@@ -546,14 +550,14 @@ defmodule Logflare.Backends.UserMonitoringTest do
   end
 
   describe "endpoints" do
-    setup :start_user_monitoring_pipeline
+    setup :setup_user_monitoring_exporter
 
     setup do
       insert(:plan)
       :ok
     end
 
-    test "endpoints.query.total_bytes_processed" do
+    test "endpoints.query.total_bytes_processed", %{monitoring_pipeline: monitoring_pipeline} do
       pid = self()
 
       GoogleApi.BigQuery.V2.Api.Tabledata
@@ -571,8 +575,9 @@ defmodule Logflare.Backends.UserMonitoringTest do
       end)
 
       user = insert(:user, system_monitoring: true)
-      source = insert(:source, user: user, system_source_type: :metrics)
+      source = insert(:source, user: user, system_source: true, system_source_type: :metrics)
       start_supervised!({SourceSup, source}, id: :source)
+      start_supervised!(monitoring_pipeline)
       # execute a query on the endpoint
       endpoint =
         insert(:endpoint,
@@ -604,7 +609,9 @@ defmodule Logflare.Backends.UserMonitoringTest do
                      5_000
     end
 
-    test "endpoints.query emits backend_id and backend_type in attributes" do
+    test "endpoints.query emits backend_id and backend_type in attributes", %{
+      monitoring_pipeline: monitoring_pipeline
+    } do
       pid = self()
 
       GoogleApi.BigQuery.V2.Api.Tabledata
@@ -618,8 +625,9 @@ defmodule Logflare.Backends.UserMonitoringTest do
       end)
 
       user = insert(:user, system_monitoring: true)
-      source = insert(:source, user: user, system_source_type: :metrics)
+      source = insert(:source, user: user, system_source: true, system_source_type: :metrics)
       start_supervised!({SourceSup, source}, id: :source)
+      start_supervised!(monitoring_pipeline)
 
       backend = insert(:backend, user: user, type: :clickhouse)
 
