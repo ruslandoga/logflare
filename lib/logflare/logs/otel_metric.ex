@@ -162,7 +162,7 @@ defmodule Logflare.Logs.OtelMetric do
         "count" => data_point.count,
         "sum" => data_point.sum,
         "scale" => data_point.scale,
-        "zero_count" => data_point.scale,
+        "zero_count" => data_point.zero_count,
         "zero_threshold" => data_point.zero_threshold,
         "positive" => exponential_histogram_buckets(data_point.positive),
         "negative" => exponential_histogram_buckets(data_point.negative),

@@ -87,3 +87,7 @@ docker compose -f docker-compose.yml -f docker-compose.pg.yml -f docker-compose.
 ### Limitations
 
 - Only **traces** and **metrics** are currently supported.
+
+### Metric conversion
+
+- Exponential histogram `zero_count` records the number of zero-valued observations independently of histogram `scale`.
