@@ -66,6 +66,27 @@ All browser authentication will be disabled when in single-tenant mode.
 
 Additional environment variable configurations for the OpenTelemetry libraries used can be found [here](https://hexdocs.pm/opentelemetry_exporter/readme.html).perf/bq-pipeline-sharding
 
+### Ingestion Pipeline Timing
+
+Elixir application configuration can set `producer_interval` (the base polling interval) and `batch_timeout` (the maximum wait before flushing a batch). Both values are positive integers in milliseconds and are read when a pipeline starts. Configuration changes apply to newly started or restarted pipelines.
+
+| Pipeline module | Default `producer_interval` | Default `batch_timeout` |
+| --- | --- | --- |
+| `Logflare.Backends.Adaptor.ClickHouseAdaptor.Pipeline` | `1000` | `5000` |
+| `Logflare.Backends.Adaptor.PostgresAdaptor.Pipeline` | `1000` | `1000` |
+| `Logflare.Backends.Adaptor.SyslogAdaptor.Pipeline` | `1000` | `1000` |
+| `Logflare.Sources.Source.BigQuery.Pipeline` | `1000` | `1500` |
+
+For example, in your Elixir configuration:
+
+```elixir
+config :logflare, Logflare.Backends.Adaptor.ClickHouseAdaptor.Pipeline,
+  producer_interval: 1_000,
+  batch_timeout: 5_000
+```
+
+Explicit pipeline start options override application configuration. For the ClickHouse batch timeout, precedence is: explicit start option, application configuration, a valid positive `batch_timeout` in the backend configuration, then the `5000` ms default.
+
 ### Upgrading
 
 #### v1.51.0

@@ -179,7 +179,7 @@ defmodule Logflare.Backends.Adaptor.OtlpAdaptorTest do
       :ok
     end
 
-    test "sends logs via REST API", %{source: source} do
+    test "sends logs via REST API", %{source: source, backend: backend} do
       this = self()
       ref = make_ref()
 
@@ -204,7 +204,7 @@ defmodule Logflare.Backends.Adaptor.OtlpAdaptorTest do
           timestamp: ts_us
         )
 
-      assert {:ok, _} = Backends.ingest_logs([log_event], source)
+      assert {:ok, _} = Backends.ingest_logs([log_event], source, backend)
       assert_receive {^ref, body}, 5000
       assert request = Protobuf.decode(body, ExportLogsServiceRequest)
       assert %{resource_logs: [%{scope_logs: [%{log_records: [log_record]}]}]} = request
@@ -216,7 +216,7 @@ defmodule Logflare.Backends.Adaptor.OtlpAdaptorTest do
       assert body =~ "nothing"
     end
 
-    test "handles multiple log events in single batch", %{source: source} do
+    test "handles multiple log events in single batch", %{source: source, backend: backend} do
       this = self()
       ref = make_ref()
 
@@ -231,13 +231,16 @@ defmodule Logflare.Backends.Adaptor.OtlpAdaptorTest do
           timestamp: System.system_time(:microsecond)
         )
 
-      assert {:ok, _} = Backends.ingest_logs(log_events, source)
+      assert {:ok, _} = Backends.ingest_logs(log_events, source, backend)
       assert_receive {^ref, body}, 5000
       assert request = Protobuf.decode(body, ExportLogsServiceRequest)
       assert %{resource_logs: [%{scope_logs: [%{log_records: [_, _, _]}]}]} = request
     end
 
-    test "hex-decodes trace_id and span_id into raw protobuf bytes", %{source: source} do
+    test "hex-decodes trace_id and span_id into raw protobuf bytes", %{
+      source: source,
+      backend: backend
+    } do
       this = self()
       ref = make_ref()
 
@@ -257,7 +260,7 @@ defmodule Logflare.Backends.Adaptor.OtlpAdaptorTest do
           timestamp: System.system_time(:microsecond)
         )
 
-      assert {:ok, _} = Backends.ingest_logs([log_event], source)
+      assert {:ok, _} = Backends.ingest_logs([log_event], source, backend)
       assert_receive {^ref, body}, 5000
 
       assert %{resource_logs: [%{scope_logs: [%{log_records: [log_record]}]}]} =
@@ -269,7 +272,10 @@ defmodule Logflare.Backends.Adaptor.OtlpAdaptorTest do
       assert byte_size(log_record.span_id) == 8
     end
 
-    test "falls back to the raw value rather than raising when not valid hex", %{source: source} do
+    test "falls back to the raw value rather than raising when not valid hex", %{
+      source: source,
+      backend: backend
+    } do
       this = self()
       ref = make_ref()
 
@@ -285,7 +291,7 @@ defmodule Logflare.Backends.Adaptor.OtlpAdaptorTest do
           timestamp: System.system_time(:microsecond)
         )
 
-      assert {:ok, _} = Backends.ingest_logs([log_event], source)
+      assert {:ok, _} = Backends.ingest_logs([log_event], source, backend)
       assert_receive {^ref, body}, 5000
 
       assert %{resource_logs: [%{scope_logs: [%{log_records: [log_record]}]}]} =
@@ -308,13 +314,13 @@ defmodule Logflare.Backends.Adaptor.OtlpAdaptorTest do
         )
 
       start_supervised!({AdaptorSupervisor, {source, backend}})
-      :timer.sleep(250)
 
-      [source: source]
+      [source: source, backend: backend]
     end
 
     test "does not duplicate content-type header when one is already configured", %{
-      source: source
+      source: source,
+      backend: backend
     } do
       this = self()
       ref = make_ref()
@@ -326,7 +332,7 @@ defmodule Logflare.Backends.Adaptor.OtlpAdaptorTest do
 
       log_event = build(:log_event, source: source, timestamp: System.system_time(:microsecond))
 
-      assert {:ok, _} = Backends.ingest_logs([log_event], source)
+      assert {:ok, _} = Backends.ingest_logs([log_event], source, backend)
       assert_receive {^ref, headers}, 5000
 
       content_type_headers =
@@ -349,12 +355,12 @@ defmodule Logflare.Backends.Adaptor.OtlpAdaptorTest do
         )
 
       start_supervised!({AdaptorSupervisor, {source, backend}})
-      :timer.sleep(250)
-      [source: source]
+      [source: source, backend: backend]
     end
 
     test "drops a user-supplied content-type so the formatter's is the only one", %{
-      source: source
+      source: source,
+      backend: backend
     } do
       this = self()
       ref = make_ref()
@@ -366,7 +372,7 @@ defmodule Logflare.Backends.Adaptor.OtlpAdaptorTest do
 
       log_event = build(:log_event, source: source, timestamp: System.system_time(:microsecond))
 
-      assert {:ok, _} = Backends.ingest_logs([log_event], source)
+      assert {:ok, _} = Backends.ingest_logs([log_event], source, backend)
       assert_receive {^ref, headers}, 5000
 
       content_types =
@@ -427,15 +433,15 @@ defmodule Logflare.Backends.Adaptor.OtlpAdaptorTest do
 
     setup %{source: source, backend: backend} do
       start_supervised!({AdaptorSupervisor, {source, backend}})
-      :timer.sleep(250)
       :ok
     end
 
     test "resource attributes describe the customer's source, not Logflare's own infra", %{
-      source: source
+      source: source,
+      backend: backend
     } do
       log_event = load_fixture_log_event("storage", source)
-      body = capture_request_body(source, log_event)
+      body = capture_request_body(source, log_event, backend)
 
       %{resource_logs: [%{resource: resource}]} = Protobuf.decode(body, ExportLogsServiceRequest)
 
@@ -465,10 +471,9 @@ defmodule Logflare.Backends.Adaptor.OtlpAdaptorTest do
       backend = insert(:backend, type: :otlp, sources: [source], config: @valid_config)
 
       start_supervised!({AdaptorSupervisor, {source, backend}}, id: :service_name_test_adaptor)
-      :timer.sleep(250)
 
       log_event = load_fixture_log_event("storage", source)
-      body = capture_request_body(source, log_event)
+      body = capture_request_body(source, log_event, backend)
 
       %{resource_logs: [%{resource: resource}]} = Protobuf.decode(body, ExportLogsServiceRequest)
       attrs = Map.new(resource.attributes, fn %{key: key, value: value} -> {key, value} end)
@@ -489,10 +494,9 @@ defmodule Logflare.Backends.Adaptor.OtlpAdaptorTest do
         )
 
       start_supervised!({AdaptorSupervisor, {source, backend}}, id: :namespace_test_adaptor)
-      :timer.sleep(250)
 
       log_event = load_fixture_log_event("storage", source)
-      body = capture_request_body(source, log_event)
+      body = capture_request_body(source, log_event, backend)
 
       %{resource_logs: [%{resource: resource}]} = Protobuf.decode(body, ExportLogsServiceRequest)
       attrs = Map.new(resource.attributes, fn %{key: key, value: value} -> {key, value} end)
@@ -500,9 +504,12 @@ defmodule Logflare.Backends.Adaptor.OtlpAdaptorTest do
       assert any_value_to_term(attrs["service.namespace"]) == "my-distinctive-project-ref"
     end
 
-    test "scope identifies Logflare itself regardless of source", %{source: source} do
+    test "scope identifies Logflare itself regardless of source", %{
+      source: source,
+      backend: backend
+    } do
       log_event = load_fixture_log_event("storage", source)
-      body = capture_request_body(source, log_event)
+      body = capture_request_body(source, log_event, backend)
 
       %{resource_logs: [%{scope_logs: [%{scope: scope}]}]} =
         Protobuf.decode(body, ExportLogsServiceRequest)
@@ -518,9 +525,9 @@ defmodule Logflare.Backends.Adaptor.OtlpAdaptorTest do
           {"postgres", ~s(metadata.parsed.error_severity = "LOG"), :SEVERITY_NUMBER_INFO}
         ] do
       test "#{fixture}: severity_number is derived from #{severity_signal}",
-           %{source: source} do
+           %{source: source, backend: backend} do
         log_event = load_fixture_log_event(unquote(fixture), source)
-        body = capture_request_body(source, log_event)
+        body = capture_request_body(source, log_event, backend)
 
         %{resource_logs: [%{scope_logs: [%{log_records: [log_record]}]}]} =
           Protobuf.decode(body, ExportLogsServiceRequest)
@@ -530,7 +537,8 @@ defmodule Logflare.Backends.Adaptor.OtlpAdaptorTest do
     end
 
     test "severity_number maps HTTP status ranges to WARN/ERROR, not just INFO", %{
-      source: source
+      source: source,
+      backend: backend
     } do
       for {status, expected} <- [
             {200, :SEVERITY_NUMBER_INFO},
@@ -542,7 +550,7 @@ defmodule Logflare.Backends.Adaptor.OtlpAdaptorTest do
           |> load_fixture_log_event(source)
           |> put_in([Access.key!(:body), "metadata", "response", "status_code"], status)
 
-        body = capture_request_body(source, log_event)
+        body = capture_request_body(source, log_event, backend)
 
         %{resource_logs: [%{scope_logs: [%{log_records: [log_record]}]}]} =
           Protobuf.decode(body, ExportLogsServiceRequest)
@@ -552,14 +560,15 @@ defmodule Logflare.Backends.Adaptor.OtlpAdaptorTest do
     end
 
     test "postgres error_severity takes priority over metadata.level when both are present", %{
-      source: source
+      source: source,
+      backend: backend
     } do
       log_event =
         "postgres"
         |> load_fixture_log_event(source)
         |> put_in([Access.key!(:body), "metadata", "level"], "debug")
 
-      body = capture_request_body(source, log_event)
+      body = capture_request_body(source, log_event, backend)
 
       %{resource_logs: [%{scope_logs: [%{log_records: [log_record]}]}]} =
         Protobuf.decode(body, ExportLogsServiceRequest)
@@ -569,7 +578,10 @@ defmodule Logflare.Backends.Adaptor.OtlpAdaptorTest do
       assert log_record.severity_number == :SEVERITY_NUMBER_INFO
     end
 
-    test "postgres severity levels map through the full range", %{source: source} do
+    test "postgres severity levels map through the full range", %{
+      source: source,
+      backend: backend
+    } do
       for {pg_level, expected} <- [
             {"PANIC", :SEVERITY_NUMBER_FATAL},
             {"FATAL", :SEVERITY_NUMBER_FATAL},
@@ -584,7 +596,7 @@ defmodule Logflare.Backends.Adaptor.OtlpAdaptorTest do
           |> load_fixture_log_event(source)
           |> put_in([Access.key!(:body), "metadata", "parsed", "error_severity"], pg_level)
 
-        body = capture_request_body(source, log_event)
+        body = capture_request_body(source, log_event, backend)
 
         %{resource_logs: [%{scope_logs: [%{log_records: [log_record]}]}]} =
           Protobuf.decode(body, ExportLogsServiceRequest)
@@ -601,10 +613,9 @@ defmodule Logflare.Backends.Adaptor.OtlpAdaptorTest do
       backend = insert(:backend, type: :otlp, sources: [source], config: @valid_config)
 
       start_supervised!({AdaptorSupervisor, {source, backend}}, id: :legacy_shape_test_adaptor)
-      :timer.sleep(250)
 
       log_event = load_fixture_log_event("storage", source)
-      body = capture_request_body(source, log_event)
+      body = capture_request_body(source, log_event, backend)
 
       %{resource_logs: [%{scope_logs: [%{log_records: [log_record]}]}]} =
         Protobuf.decode(body, ExportLogsServiceRequest)
@@ -632,10 +643,8 @@ defmodule Logflare.Backends.Adaptor.OtlpAdaptorTest do
         id: :structured_shape_test_adaptor
       )
 
-      :timer.sleep(250)
-
       log_event = load_fixture_log_event("storage", source)
-      body = capture_request_body(source, log_event)
+      body = capture_request_body(source, log_event, backend)
 
       %{resource_logs: [%{scope_logs: [%{log_records: [log_record]}]}]} =
         Protobuf.decode(body, ExportLogsServiceRequest)
@@ -669,10 +678,8 @@ defmodule Logflare.Backends.Adaptor.OtlpAdaptorTest do
         id: :structured_flatten_test_adaptor
       )
 
-      :timer.sleep(250)
-
       log_event = load_fixture_log_event("edge_log", source)
-      body = capture_request_body(source, log_event)
+      body = capture_request_body(source, log_event, backend)
 
       %{resource_logs: [%{scope_logs: [%{log_records: [log_record]}]}]} =
         Protobuf.decode(body, ExportLogsServiceRequest)
@@ -704,8 +711,6 @@ defmodule Logflare.Backends.Adaptor.OtlpAdaptorTest do
         id: :structured_merge_test_adaptor
       )
 
-      :timer.sleep(250)
-
       log_event =
         build(:log_event,
           source: source,
@@ -714,7 +719,7 @@ defmodule Logflare.Backends.Adaptor.OtlpAdaptorTest do
           timestamp: System.system_time(:microsecond)
         )
 
-      body = capture_request_body(source, log_event)
+      body = capture_request_body(source, log_event, backend)
 
       %{resource_logs: [%{scope_logs: [%{log_records: [log_record]}]}]} =
         Protobuf.decode(body, ExportLogsServiceRequest)
@@ -759,7 +764,9 @@ defmodule Logflare.Backends.Adaptor.OtlpAdaptorTest do
 
   defp any_value_to_term(%{value: nil}), do: nil
 
-  defp capture_request_body(source, log_event) do
+  @spec capture_request_body(Logflare.Sources.Source.t(), LogEvent.t(), Backends.Backend.t()) ::
+          binary()
+  defp capture_request_body(source, log_event, backend) do
     this = self()
     ref = make_ref()
 
@@ -768,7 +775,7 @@ defmodule Logflare.Backends.Adaptor.OtlpAdaptorTest do
       {:ok, %Tesla.Env{status: 200, body: ""}}
     end)
 
-    assert {:ok, _} = Backends.ingest_logs([log_event], source)
+    assert {:ok, _} = Backends.ingest_logs([log_event], source, backend)
     assert_receive {^ref, body}, 5000
     body
   end

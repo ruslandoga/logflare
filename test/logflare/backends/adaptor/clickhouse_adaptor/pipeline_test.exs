@@ -215,11 +215,18 @@ defmodule Logflare.Backends.Adaptor.ClickHouseAdaptor.PipelineTest do
     end
 
     test "starts the batcher with the pipeline default batch limits", %{backend: backend} do
-      assert %{batch_size: 60_000, batch_timeout: 5_000} =
+      assert Pipeline.default_batch_timeout() == 5_000
+      batch_timeout = Application.fetch_env!(:logflare, Pipeline)[:batch_timeout]
+
+      assert %{batch_size: 60_000, batch_timeout: ^batch_timeout} =
                TestUtils.clickhouse_batcher_state(backend)
     end
 
     test "starts the batcher with the backend's configured batch limits" do
+      pipeline_defaults = Application.fetch_env!(:logflare, Pipeline)
+      Application.put_env(:logflare, Pipeline, Keyword.delete(pipeline_defaults, :batch_timeout))
+      on_exit(fn -> Application.put_env(:logflare, Pipeline, pipeline_defaults) end)
+
       {_source, backend} =
         setup_clickhouse_test(config: %{batch_size: 2_000, batch_timeout: 1_500})
 
@@ -227,6 +234,14 @@ defmodule Logflare.Backends.Adaptor.ClickHouseAdaptor.PipelineTest do
 
       assert %{batch_size: 2_000, batch_timeout: 1_500} =
                TestUtils.clickhouse_batcher_state(backend)
+    end
+
+    test "application timing overrides the backend timeout" do
+      {_source, backend} = setup_clickhouse_test(config: %{batch_timeout: 1_500})
+      start_supervised!(ClickHouseAdaptor.child_spec(backend), id: :timed_backend)
+      batch_timeout = Application.fetch_env!(:logflare, Pipeline)[:batch_timeout]
+
+      assert %{batch_timeout: ^batch_timeout} = TestUtils.clickhouse_batcher_state(backend)
     end
 
     test "retains 64 batches of in-flight capacity independently of insert concurrency" do

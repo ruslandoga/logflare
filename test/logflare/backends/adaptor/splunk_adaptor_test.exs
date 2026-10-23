@@ -142,7 +142,7 @@ defmodule Logflare.Backends.Adaptor.SplunkAdaptorTest do
       :ok
     end
 
-    test "sends HEC events via the collector API", %{source: source} do
+    test "sends HEC events via the collector API", %{source: source, backend: backend} do
       this = self()
       ref = make_ref()
 
@@ -159,7 +159,7 @@ defmodule Logflare.Backends.Adaptor.SplunkAdaptorTest do
 
       log_events = build_list(3, :log_event, source: source, message: "some msg")
 
-      assert {:ok, _} = Backends.ingest_logs(log_events, source)
+      assert {:ok, _} = Backends.ingest_logs(log_events, source, backend)
       assert_receive {^ref, body}, 5000
 
       events = Jason.decode!(body)
