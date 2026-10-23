@@ -649,6 +649,13 @@ fn encode_float64(output: &mut BinaryBuilder, value: Term) -> EncodeResult<()> {
         value
     } else if let Ok(value) = value.decode::<i64>() {
         value as f64
+    } else if let Ok(binary) = value.decode::<Binary>() {
+        match binary.as_slice() {
+            b"NaN" => f64::NAN,
+            b"Infinity" => f64::INFINITY,
+            b"-Infinity" => f64::NEG_INFINITY,
+            _ => return Err("mapped Float64 field is not numeric".to_string()),
+        }
     } else {
         return Err("mapped Float64 field is not numeric".to_string());
     };

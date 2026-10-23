@@ -19,6 +19,8 @@ Supported ingestion formats:
 - http/json
 - grpc/protobuf
 
+Non-finite numeric values are represented as the strings `"NaN"`, `"Infinity"`, and `"-Infinity"` in converted event bodies and JSON output. ClickHouse numeric columns retain their IEEE 754 non-finite Float64 values when encoded as RowBinary.
+
 ### Configuration Examples
 
 <Tabs>
