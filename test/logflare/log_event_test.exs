@@ -1,9 +1,10 @@
 defmodule Logflare.LogEventTest do
-  @moduledoc false
   use Logflare.DataCase
   use ExUnitProperties
 
   alias Logflare.LogEvent
+  alias Logflare.Logs.Validators.BigQuerySchemaChange
+  alias Logflare.SourceSchemas
   alias Logflare.Sources.Source
   alias Logflare.Utils
 
@@ -33,13 +34,66 @@ defmodule Logflare.LogEventTest do
     assert source_id == source.id
   end
 
-  describe "bigquery_spec" do
-    test "dashes to underscores", %{source: source} do
-      assert %LogEvent{
-               body: %{
-                 "_test_field" => _
-               }
-             } = LogEvent.make(%{"test-field" => 123}, %{source: source})
+  describe "backend-neutral body" do
+    test "preserves original names, including names that would collide after formatting", %{
+      source: source
+    } do
+      params = %{
+        "test-field" => 123,
+        "_test_field" => 456,
+        "http.route" => "/health",
+        "1.key" => true,
+        "_TABLE_name" => "table",
+        "日本語" => "value",
+        String.duplicate("long", 40) => "long value",
+        "metadata" => %{"service.name" => "api", "service_name" => "other"},
+        "records" => [%{"nested-key" => "value"}]
+      }
+
+      assert %LogEvent{body: body, body_format: :original} =
+               LogEvent.make(params, %{source: source})
+
+      assert Map.drop(body, ["id", "timestamp"]) == params
+    end
+
+    test "cleans nulls and empty values without normalizing field names", %{source: source} do
+      params = %{
+        "null" => nil,
+        "string" => "",
+        "list" => [],
+        "map" => %{},
+        "nested" => %{"null" => nil, "http.route" => "/health", "list" => [nil, "", [], %{}, 1]},
+        "records" => [%{"empty" => "", "nested-key" => "value"}, %{}, nil]
+      }
+
+      assert %LogEvent{body: body} = LogEvent.make(params, %{source: source})
+
+      assert Map.drop(body, ["id", "timestamp"]) == %{
+               "nested" => %{"http.route" => "/health", "list" => [1]},
+               "records" => [%{"nested-key" => "value"}]
+             }
+    end
+
+    test "does not reject events against the BigQuery schema during shared ingestion", %{
+      source: source
+    } do
+      previous = Application.get_env(:logflare, BigQuerySchemaChange, [])
+      Application.put_env(:logflare, BigQuerySchemaChange, Keyword.put(previous, :enabled, true))
+      on_exit(fn -> Application.put_env(:logflare, BigQuerySchemaChange, previous) end)
+
+      source = %{source | validate_schema: true}
+
+      assert {:ok, _schema} =
+               SourceSchemas.create_or_update_source_schema(source, %{
+                 bigquery_schema: TestUtils.build_bq_schema(%{"status" => "ok"}),
+                 schema_flat_map: %{"status" => :string}
+               })
+
+      assert %LogEvent{valid: true, pipeline_error: nil} =
+               event = LogEvent.make(%{"status" => 200}, %{source: source})
+
+      assert {:error, message} = BigQuerySchemaChange.validate(event, source)
+      assert message =~ "status"
     end
   end
 
@@ -125,13 +179,13 @@ defmodule Logflare.LogEventTest do
         %{
           source
           | transform_copy_fields: """
-              _my_food:field
+              my-food:field
             """
         }
         |> Source.parse_copy_fields_config()
 
       assert %LogEvent{body: body} = LogEvent.make(%{"my-food" => 123}, %{source: source})
-      assert Map.drop(body, ["id", "timestamp"]) == %{"_my_food" => 123, "field" => 123}
+      assert Map.drop(body, ["id", "timestamp"]) == %{"my-food" => 123, "field" => 123}
     end
 
     test "whitespace-only config is a no-op", %{source: source} do
@@ -599,39 +653,43 @@ defmodule Logflare.LogEventTest do
       assert body["enriched"] == %{"org_id" => "acme"}
     end
 
-    test "paths match post-bigquery_spec field names", %{source: source} do
+    test "paths match original field names without changing similar underscore names", %{
+      source: source
+    } do
       source =
         %{source | transform_drop_fields: "my-key"}
         |> Source.parse_drop_fields_config()
 
       assert %LogEvent{body: body} =
-               LogEvent.make(%{"my-key" => 1, "keep" => 2}, %{source: source})
+               LogEvent.make(%{"my-key" => 1, "_my_key" => 2, "keep" => 3}, %{source: source})
 
-      assert body["_my_key"] == 1
-      assert body["keep"] == 2
+      refute Map.has_key?(body, "my-key")
+      assert body["_my_key"] == 2
+      assert body["keep"] == 3
 
       source =
         %{source | transform_drop_fields: "_my_key"}
         |> Source.parse_drop_fields_config()
 
       assert %LogEvent{body: body} =
-               LogEvent.make(%{"my-key" => 1, "keep" => 2}, %{source: source})
+               LogEvent.make(%{"my-key" => 1, "_my_key" => 2, "keep" => 3}, %{source: source})
 
       refute Map.has_key?(body, "_my_key")
-      assert body["keep"] == 2
+      assert body["my-key"] == 1
+      assert body["keep"] == 3
     end
   end
 
   describe "transform pipeline" do
-    test "runs all four stages in documented order", %{source: source, user: user} do
+    test "copies, enriches and drops using original field names", %{source: source, user: user} do
       insert(:key_value, user: user, key: "router", value: %{"org_id" => "acme"})
 
       source =
         %{
           source
-          | transform_copy_fields: "_my_key:metadata.original",
-            transform_key_values: "_my_key:enriched",
-            transform_drop_fields: "_my_key"
+          | transform_copy_fields: "my-key:metadata.original",
+            transform_key_values: "my-key:enriched",
+            transform_drop_fields: "my-key"
         }
         |> Source.parse_copy_fields_config()
         |> Source.parse_key_values_config()
@@ -683,7 +741,10 @@ defmodule Logflare.LogEventTest do
 
   test "make_from_db/2", %{source: source} do
     params = %{"metadata" => []}
-    assert %{body: body} = LogEvent.make_from_db(params, %{source: source})
+
+    assert %{body: body, body_format: :bigquery} =
+             LogEvent.make_from_db(params, %{source: source})
+
     # metadata should be rejected
     assert body["metadata"] == nil
 
@@ -1098,6 +1159,64 @@ defmodule Logflare.LogEventTest do
   end
 
   describe "make_from_spool/2" do
+    test "preserves original names without repeating source transformations", %{
+      source: source
+    } do
+      source =
+        %{source | transform_drop_fields: "original-key"}
+        |> Source.parse_drop_fields_config()
+
+      body = %{
+        "original-key" => 1,
+        "http.route" => "/health"
+      }
+
+      record = %{
+        id: Ecto.UUID.generate(),
+        body: body,
+        body_format: :original,
+        event_type: :log,
+        ingested_at: System.system_time(:microsecond)
+      }
+
+      assert %LogEvent{body: ^body, body_format: :original} =
+               LogEvent.make_from_spool(record, source)
+    end
+
+    test "recognizes the original body marker in JSON records", %{source: source} do
+      body = %{"http.route" => "/health"}
+
+      record = %{
+        "id" => Ecto.UUID.generate(),
+        "body" => body,
+        "body_format" => "original",
+        "event_type" => "log",
+        "ingested_at" => DateTime.utc_now() |> DateTime.to_iso8601()
+      }
+
+      assert %LogEvent{body: ^body, body_format: :original} =
+               LogEvent.make_from_spool(record, source)
+    end
+
+    test "preserves normalized names from legacy spool records", %{source: source} do
+      body = %{"_http_route" => "/health", "__1_key" => "value"}
+
+      record = %{
+        "id" => Ecto.UUID.generate(),
+        "body" => body,
+        "event_type" => "log",
+        "ingested_at" => DateTime.utc_now() |> DateTime.to_iso8601()
+      }
+
+      assert %LogEvent{body: ^body, body_format: :bigquery} =
+               LogEvent.make_from_spool(record, source)
+
+      assert %LogEvent{body: ^body, body_format: :bigquery} =
+               record
+               |> Map.put("body_format", "bigquery")
+               |> LogEvent.make_from_spool(source)
+    end
+
     test "preserves via_rule_id from an etf-decoded (atom-key) spool record", %{source: source} do
       record = %{
         id: Ecto.UUID.generate(),
@@ -1131,7 +1250,8 @@ defmodule Logflare.LogEventTest do
         ingested_at: System.system_time(:microsecond)
       }
 
-      assert %LogEvent{via_rule_id: nil} = LogEvent.make_from_spool(record, source)
+      assert %LogEvent{via_rule_id: nil, body_format: :bigquery} =
+               LogEvent.make_from_spool(record, source)
     end
 
     test "defaults via_rule_id to nil for a json-decoded record without the key (backward compat with older spool files)",
@@ -1143,7 +1263,8 @@ defmodule Logflare.LogEventTest do
         "ingested_at" => DateTime.utc_now() |> DateTime.to_iso8601()
       }
 
-      assert %LogEvent{via_rule_id: nil} = LogEvent.make_from_spool(record, source)
+      assert %LogEvent{via_rule_id: nil, body_format: :bigquery} =
+               LogEvent.make_from_spool(record, source)
     end
   end
 end

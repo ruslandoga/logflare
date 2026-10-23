@@ -3,6 +3,7 @@ defmodule Logflare.Backends.Spool.EncoderTest do
 
   alias Logflare.Backends.Spool.Encoder
   alias Logflare.LogEvent
+  alias Logflare.Sources.Source
 
   defp log_event(body, via_rule_id) do
     %LogEvent{
@@ -24,11 +25,60 @@ defmodule Logflare.Backends.Spool.EncoderTest do
       raw = Encoder.encode_raw_chunk(events)
 
       assert <<1::32-big, etf::binary>> = raw
-      assert [%{via_rule_id: 123}] = :erlang.binary_to_term(etf)
+      assert [%{via_rule_id: 123, body_format: :original}] = :erlang.binary_to_term(etf)
+    end
+
+    test "retains the format marker when a legacy event is encoded again" do
+      source = %Source{id: 1, token: :spool_test, name: "spool test"}
+
+      body = %{
+        ("_" <> String.duplicate("a", 128)) => "long legacy name",
+        "_http_route" => "/health"
+      }
+
+      event = %{log_event(body, nil) | body_format: :bigquery}
+
+      assert <<1::32-big, etf::binary>> = Encoder.encode_raw_chunk([event])
+      assert [%{body_format: :bigquery} = record] = :erlang.binary_to_term(etf)
+
+      assert %LogEvent{body: ^body, body_format: :bigquery} =
+               LogEvent.make_from_spool(record, source)
     end
   end
 
   describe "decode_segments/1 and count_events/1" do
+    test "original names and empty values survive encoding and event reconstruction" do
+      source = %Source{id: 1, token: :spool_test, name: "spool test"}
+
+      event =
+        LogEvent.make(
+          %{
+            "timestamp" => 1_700_000_000_000_000,
+            "http.route" => "/health",
+            "_http_route" => "separate",
+            "metadata" => %{"empty-map" => %{}, "null" => nil},
+            "values" => [nil, "", [], %{}]
+          },
+          %{source: source}
+        )
+
+      {frame, _size} =
+        event |> List.wrap() |> Encoder.encode_raw_chunk() |> DurableBuffer.WAL.encode()
+
+      file_body = IO.iodata_to_binary(frame)
+
+      assert {[etf], _valid, ""} = Encoder.decode_segments(file_body)
+      assert [%{body_format: :original} = record] = :erlang.binary_to_term(etf)
+
+      restored = LogEvent.make_from_spool(record, source)
+      assert restored.body == event.body
+      assert restored.body_format == :original
+      assert restored.id == event.id
+      assert restored.event_type == event.event_type
+      assert restored.ingested_at == event.ingested_at
+      assert restored.day_bucket == event.day_bucket
+    end
+
     test "decode_segments strips each segment's event-count header" do
       segment = Encoder.encode_raw_chunk([log_event(%{"message" => "hello"}, 123)])
       {frame, _size} = DurableBuffer.WAL.encode(segment)

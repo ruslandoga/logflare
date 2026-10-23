@@ -12,16 +12,18 @@ defmodule Logflare.LogEvent do
   alias __MODULE__.TypeDetection
   alias Logflare.KeyValues
   alias Logflare.Logs.Ingest.MetadataCleaner
-  alias Logflare.Logs.IngestTransformers
-  alias Logflare.Logs.Validators.BigQuerySchemaChange
   alias Logflare.Sources.Source
   alias Logflare.Utils
-
-  @validators [BigQuerySchemaChange]
 
   @primary_key {:id, :binary_id, []}
   typed_embedded_schema do
     field :body, :map, default: %{}
+
+    field :body_format, Ecto.Enum,
+      values: [:original, :bigquery],
+      default: :original,
+      virtual: true
+
     field :valid, :boolean
     field :drop, :boolean, default: false
     field :timestamp_inferred, :boolean, default: false
@@ -48,11 +50,13 @@ defmodule Logflare.LogEvent do
 
   @doc """
   Reconstructs a LogEvent from a record stored in the spool by the producer pipeline.
-  Skips the full make/transform/validate pipeline — the body is already in
-  BQ column spec format and the event was already validated on ingest.
+  Preserves the stored body without repeating source transformations. New records
+  keep original field names; legacy records retain their BigQuery-normalized names.
+  A missing body format marker identifies a legacy BigQuery-formatted record.
+  Backend formatting and validation happen after replay.
 
   Handles both NDJSON (string keys, ISO8601 ingested_at) and ETF (atom keys,
-  native DateTime) formats written by the producer.
+  integer microsecond ingested_at) formats written by the producer.
   """
   @spec make_from_spool(map(), Source.t(), term()) :: t()
   def make_from_spool(record, source, handle \\ nil)
@@ -77,6 +81,7 @@ defmodule Logflare.LogEvent do
       source_uuid: source.token,
       source_name: source.name,
       body: body,
+      body_format: spool_body_format(Map.get(record, :body_format)),
       event_type: event_type,
       ingested_at: ingested_at_dt,
       valid: true,
@@ -106,6 +111,7 @@ defmodule Logflare.LogEvent do
       source_uuid: source.token,
       source_name: source.name,
       body: body,
+      body_format: spool_body_format(Map.get(record, "body_format")),
       event_type: String.to_existing_atom(event_type),
       ingested_at: ingested_at_dt,
       valid: true,
@@ -115,6 +121,10 @@ defmodule Logflare.LogEvent do
       spool_handle: handle
     }
   end
+
+  @spec spool_body_format(nil | atom() | String.t()) :: :original | :bigquery
+  defp spool_body_format(format) when format in [:original, "original"], do: :original
+  defp spool_body_format(format) when format in [nil, :bigquery, "bigquery"], do: :bigquery
 
   @doc """
   Used to generate log events from bigquery rows.
@@ -129,11 +139,13 @@ defmodule Logflare.LogEvent do
     |> cast(params, [:valid, :id, :body])
     |> cast_embed(:pipeline_error, with: &pipeline_error_changeset/2)
     |> apply_changes()
+    |> Map.put(:body_format, :bigquery)
     |> Map.put(:source_id, source.id)
   end
 
   @doc """
-  Used to make log event from user-provided parameters, for ingestion.
+  Builds an event for ingestion with original field names. Generic null/empty
+  cleanup and source transformations run before backend-specific formatting.
   """
   @spec make(%{optional(String.t()) => term}, %{source: Source.t()}) :: LE.t()
   def make(
@@ -166,7 +178,6 @@ defmodule Logflare.LogEvent do
       day_bucket: day_bucket
     }
     |> transform(source)
-    |> validate(source)
   end
 
   @spec mapper_from_db(map(), TypeDetection.event_type()) :: %{String.t() => term}
@@ -178,7 +189,7 @@ defmodule Logflare.LogEvent do
 
   @spec mapper_for_ingest(map(), TypeDetection.event_type()) :: %{String.t() => term}
   defp mapper_for_ingest(params, event_type),
-    do: mapper(params, event_type, &clean_ingest_body/1)
+    do: mapper(params, event_type, &MetadataCleaner.clean_with_byte_size/1)
 
   @spec mapper(map(), TypeDetection.event_type(), (map() -> {map(), non_neg_integer() | nil})) ::
           %{String.t() => term}
@@ -222,32 +233,6 @@ defmodule Logflare.LogEvent do
       "timestamp_inferred" => timestamp_inferred
     }
   end
-
-  @spec validate(LE.t(), Source.t()) :: LE.t()
-  defp validate(%LE{valid: true} = le, source) do
-    @validators
-    |> Enum.reduce_while(true, fn validator, _acc ->
-      case validator.validate(le, source) do
-        :ok ->
-          {:cont, %{le | valid: true, pipeline_error: nil}}
-
-        {:error, message} ->
-          {:halt,
-           %{
-             le
-             | valid: false,
-               pipeline_error: %LE.PipelineError{
-                 stage: "validators",
-                 type: "validate",
-                 message: message
-               }
-           }}
-      end
-    end)
-  end
-
-  @spec clean_ingest_body(map()) :: {map(), non_neg_integer()}
-  defp clean_ingest_body(params), do: IngestTransformers.transform_with_byte_size(params)
 
   @spec transform(LE.t(), Source.t()) :: LE.t()
   defp transform(%LE{} = le, %Source{} = source) do

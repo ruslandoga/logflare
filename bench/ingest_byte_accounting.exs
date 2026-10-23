@@ -1,16 +1,16 @@
-# Snapshot the pre-feedback transformer, then run without starting the application:
-# jj file show -r 2dc251d0 lib/logflare/logs/ingest_transformers.ex > /tmp/byte-accounting-baseline.ex
+# Snapshot the existing cleaner, then run without starting the application:
+# git show 2dc4c3c70:lib/logflare/logs/cleaner.ex > /tmp/byte-accounting-baseline.ex
 # BYTE_ACCOUNTING_BASELINE=/tmp/byte-accounting-baseline.ex ../bin/x mix run --no-start bench/ingest_byte_accounting.exs
 
 alias Logflare.LogEvent
-alias Logflare.Logs.IngestTransformers
+alias Logflare.Logs.Ingest.MetadataCleaner
 
 baseline_path = System.fetch_env!("BYTE_ACCOUNTING_BASELINE")
 
 baseline_path
 |> File.read!()
 |> String.replace(
-  "defmodule Logflare.Logs.IngestTransformers do",
+  "defmodule Logflare.Logs.Ingest.MetadataCleaner do",
   "defmodule ByteAccountingBaseline do"
 )
 |> Code.compile_string()
@@ -42,11 +42,11 @@ inputs = %{
   }
 }
 
-baseline = fn input -> ByteAccountingBaseline.transform(input, :clean_to_bigquery_column_spec) end
+baseline = fn input -> ByteAccountingBaseline.deep_reject_nil_and_empty(input) end
 
 for {name, input} <- inputs do
   body = baseline.(input)
-  {fused_body, accounted_bytes} = IngestTransformers.transform_with_byte_size(input)
+  {fused_body, accounted_bytes} = MetadataCleaner.clean_with_byte_size(input)
   true = body == fused_body
   true = accounted_bytes == LogEvent.body_byte_size(body)
   IO.puts("#{name}: batch=#{:erlang.external_size(body)} accounted=#{accounted_bytes}")
@@ -56,7 +56,7 @@ time = System.get_env("BYTE_ACCOUNTING_BENCH_TIME", "2") |> String.to_integer()
 
 Benchee.run(
   %{
-    "existing transform + batch estimate" => fn input ->
+    "existing cleanup + batch estimate" => fn input ->
       body = baseline.(input)
       {body, :erlang.external_size(body)}
     end,
@@ -65,7 +65,7 @@ Benchee.run(
       {body, :erlang.external_size(body), LogEvent.body_byte_size(body)}
     end,
     "fused accounting + batch estimate" => fn input ->
-      {body, bytes} = IngestTransformers.transform_with_byte_size(input)
+      {body, bytes} = MetadataCleaner.clean_with_byte_size(input)
       {body, :erlang.external_size(body), bytes}
     end,
     "separate accounting + three queue calculations" => fn input ->
@@ -73,7 +73,7 @@ Benchee.run(
       for _ <- 1..3, do: {:erlang.external_size(body), LogEvent.body_byte_size(body)}
     end,
     "fused accounting + three cached queue reads" => fn input ->
-      {body, bytes} = IngestTransformers.transform_with_byte_size(input)
+      {body, bytes} = MetadataCleaner.clean_with_byte_size(input)
       event = LogEvent.cache_sizes(%LogEvent{body: body, accounted_bytes: bytes})
       for _ <- 1..3, do: {LogEvent.batch_byte_size(event), LogEvent.accounted_byte_size(event)}
     end

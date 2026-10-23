@@ -111,6 +111,7 @@ defmodule Logflare.Backends.Spool.Encoder do
         id: log_event.id,
         source_id: log_event.source_id,
         body: log_event.body,
+        body_format: log_event.body_format,
         event_type: log_event.event_type,
         ingested_at: DateTime.to_unix(log_event.ingested_at, :microsecond),
         via_rule_id: log_event.via_rule_id

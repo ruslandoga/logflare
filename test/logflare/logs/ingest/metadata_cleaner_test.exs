@@ -1,9 +1,60 @@
 defmodule Logflare.Logs.Ingest.MetadataCleanerTest do
-  @moduledoc false
   use ExUnit.Case
 
-  alias LogflareWeb.Logs.PayloadTestUtils
+  alias Logflare.LogEvent.Size
   alias Logflare.Logs.Ingest.MetadataCleaner, as: Cleaner
+  alias LogflareWeb.Logs.PayloadTestUtils
+
+  describe "clean_with_byte_size/1" do
+    test "preserves original keys and non-empty values while removing nested empties" do
+      input = %{
+        "service.name" => "api",
+        "service-name" => "worker",
+        "_service_name" => "literal",
+        "1.key" => %{"λ" => "hé", "empty" => %{"nested" => [nil, "", [], %{}, {}]}},
+        "values" => [nil, false, 0, %{"retained" => "x", "removed" => []}],
+        "removed" => [[nil, %{"empty" => ""}]]
+      }
+
+      expected = %{
+        "service.name" => "api",
+        "service-name" => "worker",
+        "_service_name" => "literal",
+        "1.key" => %{"λ" => "hé"},
+        "values" => [false, 0, %{"retained" => "x"}]
+      }
+
+      assert Cleaner.clean_with_byte_size(input) == {expected, 22}
+      assert Cleaner.deep_reject_nil_and_empty(input) == expected
+    end
+
+    test "keeps list order and counts scalar values without keys or containers" do
+      input = [nil, "hé", -123, 1.5, true, false, :warn, {}, %{"a long key" => [1000, nil]}]
+      expected = ["hé", -123, 1.5, true, false, :warn, %{"a long key" => [1000]}]
+
+      assert Cleaner.clean_with_byte_size(input) == {expected, 20}
+      assert Cleaner.deep_reject_nil_and_empty(input) == expected
+      assert Cleaner.clean_with_byte_size(%{"short" => expected}) == {%{"short" => expected}, 20}
+    end
+
+    test "returns zero bytes for empty maps and lists, including recursively empty values" do
+      for input <- [%{}, %{"nested" => [[%{"empty" => nil}], "", {}, []]}] do
+        assert Cleaner.clean_with_byte_size(input) == {%{}, 0}
+      end
+
+      for input <- [[], [nil, "", [], %{}, {}, [[%{"empty" => nil}]]]] do
+        assert Cleaner.clean_with_byte_size(input) == {[], 0}
+      end
+    end
+
+    test "retains non-JSON values and their fallback size accounting" do
+      input = %{"date" => ~D[2026-10-23], "tuple" => {:tag, 1}, "empty" => nil}
+      expected = Map.delete(input, "empty")
+
+      assert Cleaner.clean_with_byte_size(input) == {expected, Size.body_byte_size(expected)}
+      assert Cleaner.deep_reject_nil_and_empty(input) == expected
+    end
+  end
 
   describe "metadata payload cleaner" do
     test "removes nils from standard cloudlare metadata" do

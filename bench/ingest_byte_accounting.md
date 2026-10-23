@@ -6,7 +6,7 @@ booleans one byte, and nil zero bytes. This is an accounting policy, not a
 ClickHouse storage or transport measurement.
 
 The existing batch estimate remains `:erlang.external_size(event.body)`. Normal
-ingestion accumulates accounting during the existing cleaning/key-normalization
+ingestion accumulates accounting during the generic null/empty-value cleanup
 pass, adjusts it for generated fields and duplicate messages, and caches both
 measurements after source transformations and custom-message generation, before
 backend fanout. Queue insertion, retries, S3 batching and ingestion telemetry
@@ -16,24 +16,28 @@ Body changes must invalidate the caches via `LogEvent.replace_body/2` or update
 them explicitly. Custom messages update accounting by a value delta; copy,
 enrichment, drop-field and Datadog body changes invalidate the caches. Spool
 records intentionally do not persist counters. Reconstructed/uncached events and
-normalized-key collisions have a correct full-traversal fallback.
+backend copies whose normalized keys collide have a correct full-traversal fallback.
 
 ## Reproduce
 
 From a provisioned workspace:
 
 ```sh
-jj file show -r 2dc251d0 lib/logflare/logs/ingest_transformers.ex > /tmp/byte-accounting-baseline.ex
+git show 2dc4c3c70:lib/logflare/logs/cleaner.ex > /tmp/byte-accounting-baseline.ex
 BYTE_ACCOUNTING_BASELINE=/tmp/byte-accounting-baseline.ex \
   ../bin/x mix run --no-start bench/ingest_byte_accounting.exs
 ```
 
-The script compiles the pre-feedback transformer under a separate module name,
+The script compiles the earlier generic cleaner under a separate module name,
 checks output equivalence, and compares existing sizing, a separate accounting
 pass, fused accounting, and three-queue reuse. It measures transformation and
-sizing only: not complete ingestion, ETS copying, network calls or compression.
+sizing only: not complete ingestion, backend key normalization, ETS copying,
+network calls or compression.
 
 ## Local results
+
+These historical results include BigQuery key normalization. The current script
+measures generic cleanup and accounting after moving key normalization to the backend.
 
 Recorded 2026-10-07 on Linux, Elixir 1.19.5/OTP 27, Benchee 1.5.0, one benchmark
 worker, two seconds timing plus one second each of warmup, memory and reductions.

@@ -56,6 +56,19 @@ defmodule Logflare.Sources.SourceRouterTest do
         assert rule_id == rule.id
       end
 
+      test "does not match a normalized alias of an original field name", %{user: user} do
+        lql_string = "metadata._http_route:legacy"
+        {:ok, filters} = Parser.parse(lql_string)
+        rule = %Rule{lql_string: lql_string, lql_filters: filters}
+        source = insert(:source, user: user, rules: [rule])
+
+        original = LogEvent.make(%{"metadata" => %{"http.route" => "legacy"}}, %{source: source})
+        assert unquote(router).matching_rules(original, source) == []
+
+        literal = LogEvent.make(%{"metadata" => %{"_http_route" => "legacy"}}, %{source: source})
+        assert unquote(router).matching_rules(literal, source) == source.rules
+      end
+
       test "list_includes operator", %{user: user} do
         build_data = fn metadata_val, filter_val ->
           rule = %Rule{

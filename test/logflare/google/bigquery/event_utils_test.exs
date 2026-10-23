@@ -2,8 +2,30 @@ defmodule Logflare.Google.BigQuery.EventUtilsTest do
   use ExUnit.Case, async: true
 
   alias Logflare.Google.BigQuery.EventUtils
+  alias Logflare.LogEvent
+  alias Logflare.Sources.Source.BigQuery.Pipeline
 
   doctest EventUtils
+
+  test "both BigQuery encoders apply the same field formatting to an original event" do
+    event = %LogEvent{
+      id: "event-id",
+      body: %{
+        "id" => "event-id",
+        "timestamp" => 1_700_000_000_000_000,
+        "event_message" => "event",
+        "metadata" => %{"http.route" => "/checkout", "empty" => nil, "1.key" => 1}
+      }
+    }
+
+    assert EventUtils.log_event_to_df_struct(event) == Pipeline.le_to_bq_row(event).json
+
+    assert EventUtils.log_event_to_df_struct(event)["metadata"] == [
+             %{"_http_route" => "/checkout", "empty" => nil, "__1_key" => 1}
+           ]
+
+    assert event.body["metadata"]["http.route"] == "/checkout"
+  end
 
   describe "prepare_for_ingest/1" do
     test "wraps event in list and nested maps in lists" do

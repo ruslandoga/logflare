@@ -15,6 +15,10 @@ On table initialization, Logflare sets optimal configuration automatically to en
 
 Ingested events are [streamed](https://cloud.google.com/bigquery/docs/streaming-data-into-bigquery) into BigQuery. This allows us to maximize the throughput into BigQuery, allowing Logflare to handle large volumes of events.
 
+BigQuery normalizes column names in its own copy of each event before schema inference and writing, such as `http.route` becoming `_http_route`. Shared ingestion still removes null and empty values, but preserves original field names for source transforms, routing, and other destinations. See [key transformation](/concepts/ingestion#key-transformation).
+
+When schema validation is enabled, a mismatch rejects only the BigQuery delivery and is reported by its pipeline. It does not reject the ingestion request or prevent delivery to other backends. Schema validation failures are not retried.
+
 :::note
 Due to this streaming requirement, BYOB GCP projects **must have billing enabled**.
 :::

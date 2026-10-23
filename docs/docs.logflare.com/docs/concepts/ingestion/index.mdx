@@ -143,19 +143,34 @@ At ingestion, the pipeline will perform the following in sequence:
 
 - `event_message` will be populated from the special `message` field if missing.
 
-2. Ensure that all field names adhere to the BigQuery column requirements. See [key transformation](#key-transformation) for more details.
+2. If set, fields will be copied in sequence. See [field copying](#copy-fields) for more details.
 
-- Any fields that are automatically adjusted will be prefixed with an underscore (`_`).
+3. If set, key-value enrichment will be applied. See [key-value enrichment](#key-value-enrichment) for more details.
 
-3. If set, fields will be copied in sequence. See [field copying](#copy-fields) for more details.
+4. If set, configured fields will be dropped from the event body. See [drop fields](#drop-fields) for more details.
 
-4. If set, key-value enrichment will be applied. See [key-value enrichment](#key-value-enrichment) for more details.
-
-5. If set, configured fields will be dropped from the event body. See [drop fields](#drop-fields) for more details.
+5. Routing rules select destinations. Each backend then formats its own copy of the event.
 
 ### Key Transformation
 
-When logging object, your object keys will be transformed automatically to comply with the respective backend in use. For example, BigQuery column requirements require that names only contain letters (a-z, A-Z), numbers (0-9), or underscores (\_), and it must start with a letter or underscore. This will be automatically handled for you when ingesting data.
+Shared ingestion removes nulls, empty strings, and empty containers as before, while retaining original field names. Source transformations and routing use these names. BigQuery formatting does not modify another destination's copy or the shared recent-event view.
+
+| Original field name | BigQuery column |
+| --- | --- |
+| `http.route` | `_http_route` |
+| `1.key` | `__1_key` |
+
+BigQuery normalizes field names before schema inference and either write API. The shared event keeps its original names for other destinations.
+
+When enabled, BigQuery schema validation applies only to BigQuery delivery. An event accepted by ingestion can fail that validation while still reaching other destinations. Such failures are reported by the BigQuery pipeline and are not retried as transient delivery errors.
+
+#### Updating existing configurations
+
+Configurations that referenced names created by the old global BigQuery cleanup must use the original names for new events. For example, change a copy or enrichment path from `_my_key` to `my-key`. BigQuery queries continue to use normalized column names. Other destinations receive original names for newly ingested data; historical data keeps its existing names.
+
+Dot-separated source transformation paths still mean nested objects. They cannot address a literal key containing a dot. LQL field syntax also cannot currently express literal dotted keys, hyphens, or Unicode names; this change does not add quoted LQL field syntax. Existing LQL rules no longer match keys that were produced only by BigQuery cleanup.
+
+For self-hosted spool deployments, upgrade consumers before producers start writing original-key records, or pause ingestion until all nodes have been upgraded. New records carry their body format. Older records without that marker are treated as already BigQuery-formatted, avoiding repeated normalization; their original names cannot be reconstructed.
 
 ### Copy Fields
 
@@ -179,7 +194,7 @@ top:backup_copy
 
 In this example, 3 additional fields will be created: `top`, `top_level_copy`, and `backup_copy`.
 
-As field name transformations to BigQuery specification occur before this step, modified field names must be used.
+Use the original field names supplied by the sender.
 
 For example, if a payload with dashes is ingested:
 
@@ -187,14 +202,14 @@ For example, if a payload with dashes is ingested:
 { "top-level": 123, ...}
 ```
 
-The field will be converted into `_top_level` in the field name transformation step. We will then have to refer to it as such in the Copy fields configuration:
+Refer to `top-level` directly in the Copy fields configuration:
 
 ```text
-_top_level:my_copied_field
+top-level:my_copied_field
 ```
 
 :::note
-Destination field names must match the BigQuery column name specification, or the event risks being rejected.
+Destination names are formatted later by each backend. BigQuery converts `top-level` to `_top_level` in its stored copy.
 :::
 
 ### Key-Value Enrichment
