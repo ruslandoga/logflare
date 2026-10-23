@@ -99,3 +99,5 @@ docker compose -f docker-compose.yml -f docker-compose.pg.yml -f docker-compose.
 - Metric points marked `NO_RECORDED_VALUE` are omitted as missing observations. Other points retain their original `flags` bitmask.
 
 - Metric aggregation temporality accepts protobuf enum names and integer values. Unknown enum values are stored as `unspecified`.
+
+- Metric descriptions are stored in `description`, and metric-level metadata is stored in `metric_metadata` separately from Logflare event metadata.
