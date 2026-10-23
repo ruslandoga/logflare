@@ -89,7 +89,7 @@ defmodule Logflare.Logs.Processor do
         # which never pass this and so can never be spooled.
         result = store_batch(batch, processor, source, result_format, conversion_report)
 
-        new_meta = Map.merge(metadata, %{success: elem(result, 0) == :ok})
+        new_meta = Map.merge(metadata, %{success: match?({:ok, _}, result)})
 
         {{result, new_meta}, new_meta}
       end)
