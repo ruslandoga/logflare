@@ -31,10 +31,6 @@ defmodule LogflareWeb.ProtobufParser do
     {:next, conn}
   end
 
-  def decode({:ok, <<>>, conn}, :json) do
-    {:ok, %{}, conn}
-  end
-
   def decode({:ok, body, conn}, :protobuf) do
     protobuf_schema = Map.fetch!(conn.assigns, :protobuf_schema)
     {:ok, protobuf_schema.decode(body), conn}
