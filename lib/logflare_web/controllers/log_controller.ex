@@ -17,6 +17,7 @@ defmodule LogflareWeb.LogController do
   alias LogflareWeb.OpenApi.Created
   alias LogflareWeb.OpenApi.ServerError
   alias LogflareWeb.OpenApiSchemas.LogsCreated
+  alias LogflareWeb.Plugs.OtlpErrorResponse
   alias Plug.Conn.Utils, as: ConnUtils
 
   action_fallback(LogflareWeb.Api.FallbackController)
@@ -428,7 +429,7 @@ defmodule LogflareWeb.LogController do
 
   defp send_proto_error(conn, status, error) do
     conn
-    |> send_proto_response(status, %Google.Rpc.Status{message: error})
+    |> send_proto_response(status, OtlpErrorResponse.status(status, error))
     |> halt()
   end
 
@@ -442,6 +443,7 @@ defmodule LogflareWeb.LogController do
       end
 
     conn
+    |> put_private(:otlp_response_encoded, true)
     |> put_resp_content_type(content_type)
     |> send_resp(status, payload)
   end
