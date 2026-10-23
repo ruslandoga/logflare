@@ -16,7 +16,9 @@ defmodule Logflare.Logs.Otel do
       iex> handle_resource(%Resource{attributes: [%KeyValue{key: "service.name", value: "foo"}]})
       %{"service.name" => "foo"}
   """
-  @spec handle_resource(Resource.t()) :: map()
+  @spec handle_resource(Resource.t() | nil) :: map()
+  def handle_resource(nil), do: %{}
+
   def handle_resource(%{attributes: attributes}) do
     Map.new(attributes, &extract_key_value/1)
   end
@@ -35,7 +37,9 @@ defmodule Logflare.Logs.Otel do
   @doc """
   Converts a InstrumentationScope to a map
   """
-  @spec handle_scope(InstrumentationScope.t()) :: map()
+  @spec handle_scope(InstrumentationScope.t() | nil) :: map()
+  def handle_scope(nil), do: handle_scope(%InstrumentationScope{})
+
   def handle_scope(scope) do
     %{name: name, version: version, attributes: scope_attributes} = scope
 
