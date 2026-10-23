@@ -181,6 +181,9 @@ defmodule Logflare.Logs.OtelMetric do
     []
   end
 
+  @spec exponential_histogram_buckets(map() | nil) :: map()
+  defp exponential_histogram_buckets(nil), do: %{"offset" => 0, "bucket_counts" => []}
+
   defp exponential_histogram_buckets(%{offset: offset, bucket_counts: bucket_counts}) do
     %{"offset" => offset, "bucket_counts" => bucket_counts}
   end

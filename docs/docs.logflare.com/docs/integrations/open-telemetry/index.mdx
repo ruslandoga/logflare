@@ -91,3 +91,5 @@ docker compose -f docker-compose.yml -f docker-compose.pg.yml -f docker-compose.
 ### Metric conversion
 
 - Exponential histogram `zero_count` records the number of zero-valued observations independently of histogram `scale`.
+
+- Exponential histograms may omit positive or negative buckets. Omitted buckets are stored with offset `0` and an empty bucket-count array.
