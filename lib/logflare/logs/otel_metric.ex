@@ -58,9 +58,7 @@ defmodule Logflare.Logs.OtelMetric do
     resource = base["resource"]
     project = base["project"]
 
-    for data_point <- data_points do
-      %{value: {_, value}} = data_point
-
+    for %{value: {_, value}} = data_point <- data_points do
       %{
         "event_message" => event_message,
         "unit" => unit,
@@ -87,9 +85,7 @@ defmodule Logflare.Logs.OtelMetric do
     temporality = aggregation_temporality(sum.aggregation_temporality)
     is_monotonic = sum.is_monotonic
 
-    for data_point <- sum.data_points do
-      %{value: {_, value}} = data_point
-
+    for %{value: {_, value}} = data_point <- sum.data_points do
       %{
         "event_message" => event_message,
         "unit" => unit,
@@ -174,6 +170,8 @@ defmodule Logflare.Logs.OtelMetric do
       }
     end
   end
+
+  defp handle_metric_data(nil, _base), do: []
 
   defp handle_metric_data({type, _}, _) do
     Logger.warning("Unsupported metric type #{inspect(type)}, dropping")
