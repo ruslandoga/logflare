@@ -5,7 +5,7 @@ defmodule Logflare.Sources.Source.TextNotificationServerTest do
 
   setup do
     u1 = insert(:user)
-    s1 = insert(:source, user_id: u1.id, notifications_every: 1_000)
+    s1 = insert(:source, user_id: u1.id, notifications_every: 10)
     plan = insert(:plan, name: "metered")
     {:ok, source: s1, user: u1, plan: plan}
   end
