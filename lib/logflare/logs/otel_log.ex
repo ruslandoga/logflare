@@ -23,19 +23,32 @@ defmodule Logflare.Logs.OtelLog do
     Enum.flat_map(resource_logs, &handle_resource_logs/1)
   end
 
-  defp handle_resource_logs(%ResourceLogs{resource: resource, scope_logs: scope_logs}) do
-    resource = Otel.handle_resource(resource)
-    Enum.flat_map(scope_logs, &handle_scope_logs(&1, resource))
-  end
-
-  defp handle_scope_logs(%ScopeLogs{scope: scope, log_records: log_records}, resource) do
-    scope = Otel.handle_scope(scope)
+  defp handle_resource_logs(%ResourceLogs{
+         resource: resource,
+         scope_logs: scope_logs,
+         schema_url: schema_url
+       }) do
+    dropped_attributes_count = if resource, do: resource.dropped_attributes_count, else: 0
 
     base_event = %{
       "metadata" => %{"type" => "otel_log"},
-      "scope" => scope,
-      "resource" => resource
+      "resource" => Otel.handle_resource(resource),
+      "resource_schema_url" => schema_url,
+      "resource_dropped_attributes_count" => dropped_attributes_count
     }
+
+    Enum.flat_map(scope_logs, &handle_scope_logs(&1, base_event))
+  end
+
+  defp handle_scope_logs(
+         %ScopeLogs{scope: scope, log_records: log_records, schema_url: schema_url},
+         base_event
+       ) do
+    base_event =
+      Map.merge(base_event, %{
+        "scope" => Otel.handle_scope(scope),
+        "scope_schema_url" => schema_url
+      })
 
     Enum.map(log_records, &handle_log_record(&1, base_event))
   end

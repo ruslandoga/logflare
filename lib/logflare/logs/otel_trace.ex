@@ -17,14 +17,30 @@ defmodule Logflare.Logs.OtelTrace do
     Enum.flat_map(resource_spans, &handle_resource_span/1)
   end
 
-  defp handle_resource_span(%ResourceSpans{resource: resource, scope_spans: scope_spans}) do
+  defp handle_resource_span(%ResourceSpans{
+         resource: resource,
+         scope_spans: scope_spans,
+         schema_url: schema_url
+       }) do
+    metadata = %{
+      "resource_schema_url" => schema_url,
+      "resource_dropped_attributes_count" =>
+        Map.get(resource || %{}, :dropped_attributes_count, 0)
+    }
+
     resource = Otel.handle_resource(resource)
-    Enum.flat_map(scope_spans, &handle_scope_span(&1, resource))
+
+    scope_spans
+    |> Enum.flat_map(&handle_scope_span(&1, resource))
+    |> Enum.map(&Map.merge(&1, metadata))
   end
 
-  defp handle_scope_span(%{scope: scope, spans: spans}, resource) do
+  defp handle_scope_span(%{scope: scope, spans: spans, schema_url: schema_url}, resource) do
     scope = Otel.handle_scope(scope)
-    Enum.flat_map(spans, &handle_span(&1, resource, scope))
+
+    spans
+    |> Enum.flat_map(&handle_span(&1, resource, scope))
+    |> Enum.map(&Map.put(&1, "scope_schema_url", schema_url))
   end
 
   defp handle_span(span, resource, scope) do

@@ -50,7 +50,8 @@ defmodule Logflare.Logs.Otel do
     %{
       "name" => name,
       "version" => version,
-      "attributes" => handle_attributes(scope_attributes)
+      "attributes" => handle_attributes(scope_attributes),
+      "dropped_attributes_count" => scope.dropped_attributes_count
     }
   end
 
