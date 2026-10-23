@@ -97,3 +97,5 @@ docker compose -f docker-compose.yml -f docker-compose.pg.yml -f docker-compose.
 - Metrics without a data payload and gauge or sum points without a value are omitted. Valid points in the same batch, including zero values, are still ingested.
 
 - Metric points marked `NO_RECORDED_VALUE` are omitted as missing observations. Other points retain their original `flags` bitmask.
+
+- Metric aggregation temporality accepts protobuf enum names and integer values. Unknown enum values are stored as `unspecified`.

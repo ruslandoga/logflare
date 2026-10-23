@@ -194,7 +194,18 @@ defmodule Logflare.Logs.OtelMetric do
     %{"offset" => offset, "bucket_counts" => bucket_counts}
   end
 
-  defp aggregation_temporality(:AGGREGATION_TEMPORALITY_UNSPECIFIED), do: "unspecified"
-  defp aggregation_temporality(:AGGREGATION_TEMPORALITY_DELTA), do: "delta"
-  defp aggregation_temporality(:AGGREGATION_TEMPORALITY_CUMULATIVE), do: "cumulative"
+  @spec aggregation_temporality(atom() | integer()) :: String.t()
+  defp aggregation_temporality(temporality)
+       when temporality in [:AGGREGATION_TEMPORALITY_UNSPECIFIED, 0],
+       do: "unspecified"
+
+  defp aggregation_temporality(temporality)
+       when temporality in [:AGGREGATION_TEMPORALITY_DELTA, 1],
+       do: "delta"
+
+  defp aggregation_temporality(temporality)
+       when temporality in [:AGGREGATION_TEMPORALITY_CUMULATIVE, 2],
+       do: "cumulative"
+
+  defp aggregation_temporality(_temporality), do: "unspecified"
 end
