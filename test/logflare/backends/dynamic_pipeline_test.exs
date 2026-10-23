@@ -30,6 +30,8 @@ defmodule Logflare.Backends.DynamicPipelineTest do
     ]
   end
 
+  setup :hold_pending_events
+
   test "add_pipeline/1 can scale up pipelines", %{name: name, pipeline_args: pipeline_args} do
     start_supervised!(
       {DynamicPipeline,
@@ -86,6 +88,7 @@ defmodule Logflare.Backends.DynamicPipelineTest do
     end)
   end
 
+  @tag :hold_pending_events
   test "remove_pipeline/1 migrates a shard's pending events to a surviving shard instead of destroying them",
        %{name: name, pipeline_args: pipeline_args} do
     start_supervised!(
@@ -272,6 +275,7 @@ defmodule Logflare.Backends.DynamicPipelineTest do
     end
   end
 
+  @tag :hold_pending_events
   test "remove_pipeline/1 does not bump or ack SpoolAck when migrating a shard's pending events",
        %{name: name, pipeline_args: pipeline_args} do
     start_supervised!(
@@ -321,6 +325,7 @@ defmodule Logflare.Backends.DynamicPipelineTest do
     assert IngestEventQueue.total_pending(surviving_key) == 2
   end
 
+  @tag :hold_pending_events
   test "remove_pipeline/1 migrates to a live survivor even when a stale mapper entry is also a candidate",
        %{name: name, pipeline_args: pipeline_args} do
     start_supervised!(
@@ -573,6 +578,24 @@ defmodule Logflare.Backends.DynamicPipelineTest do
                        backend_type: ^backend_type
                      }}
   end
+
+  @spec hold_pending_events(map()) :: :ok
+  defp hold_pending_events(%{hold_pending_events: true, pipeline_args: pipeline_args}) do
+    source_id = Keyword.fetch!(pipeline_args, :source).id
+    backend_id = Keyword.fetch!(pipeline_args, :backend).id
+
+    stub(IngestEventQueue, :pop_pending_pointers, fn
+      {^source_id, ^backend_id, _producer}, _count ->
+        {:ok, [], nil}
+
+      key, count ->
+        Mimic.call_original(IngestEventQueue, :pop_pending_pointers, [key, count])
+    end)
+
+    :ok
+  end
+
+  defp hold_pending_events(_context), do: :ok
 
   defp producer_pid(pipeline_id) do
     pipeline_id |> Broadway.producer_names() |> hd() |> GenServer.whereis()

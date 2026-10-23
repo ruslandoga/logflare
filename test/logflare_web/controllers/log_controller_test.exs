@@ -37,6 +37,8 @@ defmodule LogflareWeb.LogControllerTest do
       backend =
         insert(:backend, sources: [source], type: :webhook, config: %{url: "some url"})
 
+      start_supervised!({SourceSup, source})
+
       {:ok, source: source, user: user, backend: backend}
     end
 
@@ -487,6 +489,7 @@ defmodule LogflareWeb.LogControllerTest do
       user = insert(:user)
       source = insert(:source, user: user)
       insert(:plan, name: "Free")
+      start_supervised!({SourceSup, source})
 
       log =
         capture_log(fn ->
@@ -506,6 +509,7 @@ defmodule LogflareWeb.LogControllerTest do
       user = insert(:user)
       source = insert(:source, user: user)
       insert(:plan, name: "Free")
+      start_supervised!({SourceSup, source})
 
       log =
         capture_log(fn ->
@@ -545,7 +549,7 @@ defmodule LogflareWeb.LogControllerTest do
       source: source,
       user: user
     } do
-      expect_bq_insert()
+      stub_bq_inserts()
 
       conn =
         post(
@@ -594,7 +598,7 @@ defmodule LogflareWeb.LogControllerTest do
     end
 
     test ":create ingestion by source_name", %{conn: conn, source: source} do
-      expect_bq_insert()
+      stub_bq_inserts()
 
       conn =
         conn
@@ -605,7 +609,7 @@ defmodule LogflareWeb.LogControllerTest do
     end
 
     test ":create ingestion", %{conn: conn, source: source} do
-      expect_bq_insert()
+      stub_bq_inserts()
 
       conn =
         conn
@@ -616,7 +620,7 @@ defmodule LogflareWeb.LogControllerTest do
     end
 
     test ":create ingestion with gzip", %{conn: conn, source: source} do
-      expect_bq_insert()
+      stub_bq_inserts()
 
       batch = for _i <- 1..100, do: @valid
       payload = :zlib.gzip(Jason.encode!(%{"batch" => batch}))
@@ -628,22 +632,22 @@ defmodule LogflareWeb.LogControllerTest do
         |> post(~p"/logs?#{[source: source.token]}", payload)
 
       assert_logged_successfully(conn)
-      assert_eventually_received(:inserted)
+      for _event <- batch, do: assert_eventually_received(:inserted)
     end
 
     test ":create ingestion batch with `batch` key", %{conn: conn, source: source} do
-      expect_bq_insert()
+      stub_bq_inserts()
 
       conn =
         conn
         |> post(Routes.log_path(conn, :create, source: source.token), %{"batch" => @valid_batch})
 
       assert_logged_successfully(conn)
-      assert_eventually_received(:inserted)
+      for _event <- @valid_batch, do: assert_eventually_received(:inserted)
     end
 
     test ":create ingestion batch with array body", %{conn: conn, source: source} do
-      expect_bq_insert()
+      stub_bq_inserts()
 
       conn =
         conn
@@ -651,11 +655,11 @@ defmodule LogflareWeb.LogControllerTest do
         |> post(Routes.log_path(conn, :create, source: source.token), Jason.encode!(@valid_batch))
 
       assert_logged_successfully(conn)
-      assert_eventually_received(:inserted)
+      for _event <- @valid_batch, do: assert_eventually_received(:inserted)
     end
 
     test ":cloudflare ingestion", %{conn: new_conn, source: source} do
-      expect_bq_insert()
+      stub_bq_inserts()
 
       path = Routes.log_path(new_conn, :cloudflare, source: source.token)
 
@@ -667,11 +671,11 @@ defmodule LogflareWeb.LogControllerTest do
                "message" => "Logged!"
              }
 
-      assert_eventually_received(:inserted)
+      for _request <- 1..2, do: assert_eventually_received(:inserted)
     end
 
     test ":elixir_logger ingestion with source_name in BERT body", %{conn: conn, source: source} do
-      expect_bq_insert()
+      stub_bq_inserts()
 
       body =
         Bertex.encode(%{
@@ -696,7 +700,7 @@ defmodule LogflareWeb.LogControllerTest do
     end
 
     test ":create ingestion with source token in JSON body", %{conn: conn, source: source} do
-      expect_bq_insert()
+      stub_bq_inserts()
 
       conn =
         conn
@@ -711,7 +715,7 @@ defmodule LogflareWeb.LogControllerTest do
     end
 
     test ":create ingestion with source_name in JSON body", %{conn: conn, source: source} do
-      expect_bq_insert()
+      stub_bq_inserts()
 
       conn =
         conn
@@ -735,7 +739,7 @@ defmodule LogflareWeb.LogControllerTest do
     setup [:warm_caches, :reject_context_functions]
 
     test ":create ingestion by source_name", %{conn: conn, source: source} do
-      expect_bq_insert()
+      stub_bq_inserts()
 
       conn =
         conn
@@ -1273,14 +1277,15 @@ defmodule LogflareWeb.LogControllerTest do
     {pid, ref}
   end
 
-  defp expect_bq_insert(pid \\ self()) do
+  @spec stub_bq_inserts(pid()) :: module()
+  defp stub_bq_inserts(pid \\ self()) do
     GoogleApi.BigQuery.V2.Api.Tabledata
-    |> expect(:bigquery_tabledata_insert_all, fn _conn,
-                                                 _project_id,
-                                                 _dataset_id,
-                                                 _table_name,
-                                                 _opts ->
-      send(pid, :inserted)
+    |> stub(:bigquery_tabledata_insert_all, fn _conn,
+                                               _project_id,
+                                               _dataset_id,
+                                               _table_name,
+                                               opts ->
+      for _row <- opts[:body].rows, do: send(pid, :inserted)
       {:ok, %GoogleApi.BigQuery.V2.Model.TableDataInsertAllResponse{insertErrors: nil}}
     end)
   end
