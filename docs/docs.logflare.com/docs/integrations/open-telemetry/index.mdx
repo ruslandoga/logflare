@@ -103,3 +103,5 @@ docker compose -f docker-compose.yml -f docker-compose.pg.yml -f docker-compose.
 - Metric descriptions are stored in `description`, and metric-level metadata is stored in `metric_metadata` separately from Logflare event metadata.
 
 - Metric exemplars retain their values, timestamps, filtered attributes, and hexadecimal trace and span IDs. Exemplars without a value are omitted.
+
+- Non-finite metric numbers are stored as the JSON-compatible strings `NaN`, `Infinity`, and `-Infinity`; finite numbers and absent optional fields retain their original values.
