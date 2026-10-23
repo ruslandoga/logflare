@@ -393,7 +393,8 @@ defmodule LogflareWeb.LogControllerTest do
         |> put_req_header("content-type", "application/x-protobuf")
         |> post(Routes.log_path(conn, :otel_metrics), @valid)
 
-      assert json_response(conn, 401)
+      assert %Google.Rpc.Status{code: 16, message: "Unauthorized"} =
+               protobuf_response(conn, 401, Google.Rpc.Status)
     end
   end
 
@@ -445,7 +446,8 @@ defmodule LogflareWeb.LogControllerTest do
             |> put_req_header("content-type", "application/x-protobuf")
             |> post(~p"/v1/logs", "garbage protobuf #{@attacker_marker}")
 
-          assert json_response(conn, 401)
+          assert %Google.Rpc.Status{code: 16, message: "Unauthorized"} =
+                   protobuf_response(conn, 401, Google.Rpc.Status)
         end)
 
       refute log =~ @attacker_marker
@@ -492,7 +494,8 @@ defmodule LogflareWeb.LogControllerTest do
             |> put_req_header("x-api-key", "this-key-is-not-valid")
             |> post(~p"/v1/logs", "garbage protobuf #{@attacker_marker}")
 
-          assert json_response(conn, 401)
+          assert %Google.Rpc.Status{code: 16, message: "Unauthorized"} =
+                   protobuf_response(conn, 401, Google.Rpc.Status)
         end)
 
       refute log =~ @attacker_marker

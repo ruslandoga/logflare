@@ -53,6 +53,8 @@ failure returns `INTERNAL` instead of a successful acknowledgement.
 
 ### Validation responses
 
+OTLP HTTP authentication, request parsing, body-size, and ingestion failures use a Google RPC Status response in the request's JSON or binary protobuf encoding. The HTTP status is preserved, including `401` for missing credentials, `400` for malformed payloads, and `413` for oversized bodies. The response's `code` identifies the corresponding Google RPC error category.
+
 Unexpected ingestion failures return HTTP `500` with a Google RPC Status body in the request encoding. They never return a successful acknowledgement of the batch.
 
 OTLP/HTTP and OTLP/gRPC responses include `partial_success` when validation rejects

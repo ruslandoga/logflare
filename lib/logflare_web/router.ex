@@ -119,6 +119,10 @@ defmodule LogflareWeb.Router do
     plug(LogflareWeb.Plugs.BufferLimiter)
   end
 
+  pipeline :otlp_error_response do
+    plug(LogflareWeb.Plugs.OtlpErrorResponse)
+  end
+
   pipeline :ingest_otlp_api do
     plug(Plug.RequestId)
     plug(LogflareWeb.Plugs.VerifyApiAccess, require_token: true)
@@ -565,7 +569,7 @@ defmodule LogflareWeb.Router do
   end
 
   scope "/v1", LogflareWeb, assigns: %{resource_type: :source} do
-    pipe_through([:ingest_otlp_api])
+    pipe_through([:otlp_error_response, :ingest_otlp_api])
 
     post(
       "/traces",
