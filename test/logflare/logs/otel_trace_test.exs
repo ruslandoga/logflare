@@ -1,6 +1,12 @@
 defmodule Logflare.Logs.OtelTraceTest do
   use Logflare.DataCase
+
   alias Logflare.Logs.OtelTrace
+  alias Opentelemetry.Proto.Common.V1.AnyValue
+  alias Opentelemetry.Proto.Common.V1.KeyValue
+  alias Opentelemetry.Proto.Trace.V1.Span.Event
+  alias Opentelemetry.Proto.Trace.V1.Span.Link
+  alias Opentelemetry.Proto.Trace.V1.Status
 
   describe "handle_batch/1" do
     setup do
@@ -80,7 +86,14 @@ defmodule Logflare.Logs.OtelTraceTest do
         {:SPAN_KIND_SERVER, "Server"},
         {:SPAN_KIND_CLIENT, "Client"},
         {:SPAN_KIND_PRODUCER, "Producer"},
-        {:SPAN_KIND_CONSUMER, "Consumer"}
+        {:SPAN_KIND_CONSUMER, "Consumer"},
+        {0, "Unspecified"},
+        {1, "Internal"},
+        {2, "Server"},
+        {3, "Client"},
+        {4, "Producer"},
+        {5, "Consumer"},
+        {99, "Unspecified"}
       ]
 
       for {kind, expected} <- kinds do
@@ -91,6 +104,181 @@ defmodule Logflare.Logs.OtelTraceTest do
           |> Enum.find(fn params -> params["metadata"]["type"] == "span" end)
 
         assert le_span["kind"] == expected
+      end
+    end
+
+    test "preserves span status, events, links, and dropped counts", %{
+      resource_spans: [resource_span],
+      source: source
+    } do
+      [scope_span] = resource_span.scope_spans
+      [span] = scope_span.spans
+
+      attribute = %KeyValue{
+        key: "exception.type",
+        value: %AnyValue{value: {:string_value, "TimeoutError"}}
+      }
+
+      event = %Event{
+        name: "exception",
+        time_unix_nano: span.start_time_unix_nano + 123,
+        attributes: [attribute],
+        dropped_attributes_count: 4
+      }
+
+      link = %Link{
+        trace_id: <<0xEF, 0::120>>,
+        span_id: <<0xCD, 0::56>>,
+        trace_state: "linked=state",
+        attributes: [attribute],
+        flags: 769,
+        dropped_attributes_count: 5
+      }
+
+      resource = %{
+        resource_span.resource
+        | dropped_attributes_count: 6,
+          attributes: [
+            %KeyValue{
+              key: "schema_url",
+              value: %AnyValue{value: {:string_value, "custom resource attribute"}}
+            }
+            | resource_span.resource.attributes
+          ]
+      }
+
+      span = %{
+        span
+        | span_id: <<0xAB, 0::56>>,
+          trace_state: "vendor=state",
+          flags: 769,
+          dropped_attributes_count: 1,
+          events: [event],
+          dropped_events_count: 2,
+          links: [link],
+          dropped_links_count: 3,
+          status: %Status{code: :STATUS_CODE_ERROR, message: "request timed out"}
+      }
+
+      resource_span = %{
+        resource_span
+        | resource: resource,
+          schema_url: "https://opentelemetry.io/schemas/1.27.0",
+          scope_spans: [
+            %{
+              scope_span
+              | schema_url: "https://opentelemetry.io/schemas/1.26.0",
+                spans: [span]
+            }
+          ]
+      }
+
+      assert [converted_span, converted_event] = OtelTrace.handle_batch([resource_span], source)
+
+      assert converted_span["status"] == %{"code" => "ERROR", "message" => "request timed out"}
+      assert converted_span["trace_state"] == "vendor=state"
+      assert converted_span["flags"] == 769
+      assert converted_span["dropped_attributes_count"] == 1
+      assert converted_span["dropped_events_count"] == 2
+      assert converted_span["dropped_links_count"] == 3
+      assert converted_span["resource_dropped_attributes_count"] == 6
+      assert converted_span["resource"]["schema_url"] == "custom resource attribute"
+
+      assert converted_span["resource_schema_url"] ==
+               "https://opentelemetry.io/schemas/1.27.0"
+
+      assert converted_span["scope_schema_url"] ==
+               "https://opentelemetry.io/schemas/1.26.0"
+
+      assert converted_span["events"] == [
+               %{
+                 "name" => "exception",
+                 "time_unix_nano" => event.time_unix_nano,
+                 "attributes" => %{"exception.type" => "TimeoutError"},
+                 "dropped_attributes_count" => 4
+               }
+             ]
+
+      assert converted_span["links"] == [
+               %{
+                 "trace_id" => Base.encode16(link.trace_id, case: :lower),
+                 "span_id" => Base.encode16(link.span_id, case: :lower),
+                 "trace_state" => "linked=state",
+                 "attributes" => %{"exception.type" => "TimeoutError"},
+                 "flags" => 769,
+                 "dropped_attributes_count" => 5
+               }
+             ]
+
+      assert converted_event["span_id"] == "ab00000000000000"
+      assert converted_event["parent_span_id"] == converted_span["span_id"]
+      assert converted_event["trace_id"] == converted_span["trace_id"]
+      assert converted_event["trace_flags"] == 1
+      assert converted_event["dropped_attributes_count"] == 4
+      assert converted_event["attributes"] == %{"exception.type" => "TimeoutError"}
+      assert converted_event["resource"] == converted_span["resource"]
+      assert converted_event["scope"] == converted_span["scope"]
+      assert converted_event["resource_schema_url"] == converted_span["resource_schema_url"]
+      assert converted_event["scope_schema_url"] == converted_span["scope_schema_url"]
+      assert converted_event["resource_dropped_attributes_count"] == 6
+      assert {:ok, _} = Jason.encode([converted_span, converted_event])
+    end
+
+    test "accepts omitted resource and scope and ignores empty envelopes", %{
+      resource_spans: [resource_span],
+      source: source
+    } do
+      [scope_span] = resource_span.scope_spans
+      [span] = scope_span.spans
+
+      resource_span = %{
+        resource_span
+        | resource: nil,
+          scope_spans: [%{scope_span | scope: nil, spans: [%{span | events: []}]}]
+      }
+
+      assert [converted_span] = OtelTrace.handle_batch([resource_span], source)
+      assert converted_span["resource"] == %{}
+      assert converted_span["resource_dropped_attributes_count"] == 0
+      assert %{"name" => "", "attributes" => %{}} = converted_span["scope"]
+      assert converted_span["events"] == []
+      assert converted_span["links"] == []
+      assert converted_span["project"] == nil
+      assert OtelTrace.handle_batch([], source) == []
+      assert OtelTrace.handle_batch([%{resource_span | scope_spans: []}], source) == []
+
+      assert OtelTrace.handle_batch(
+               [%{resource_span | scope_spans: [%{scope_span | spans: []}]}],
+               source
+             ) == []
+    end
+
+    test "handles omitted, known, and unknown span status codes", %{
+      resource_spans: [resource_span],
+      source: source
+    } do
+      [scope_span] = resource_span.scope_spans
+      [span] = scope_span.spans
+
+      statuses = [
+        {nil, "UNSET"},
+        {%Status{code: :STATUS_CODE_UNSET}, "UNSET"},
+        {%Status{code: :STATUS_CODE_OK}, "OK"},
+        {%Status{code: :STATUS_CODE_ERROR}, "ERROR"},
+        {%Status{code: 0}, "UNSET"},
+        {%Status{code: 1}, "OK"},
+        {%Status{code: 2}, "ERROR"},
+        {%Status{code: 99}, 99}
+      ]
+
+      for {status, expected} <- statuses do
+        resource_span = %{
+          resource_span
+          | scope_spans: [%{scope_span | spans: [%{span | status: status, events: []}]}]
+        }
+
+        assert [converted_span] = OtelTrace.handle_batch([resource_span], source)
+        assert converted_span["status"] == %{"code" => expected, "message" => ""}
       end
     end
 

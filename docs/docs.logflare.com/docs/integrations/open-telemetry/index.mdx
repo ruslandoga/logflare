@@ -27,6 +27,14 @@ Trace and span IDs use lowercase hexadecimal. Standalone log records created fro
 span events include the containing span's `span_id` and `trace_id`, so you can
 correlate those event logs with their traces.
 
+### Trace payload fields
+
+Span records retain their status, trace state, links, nested events, flags, and
+counts of dropped attributes, events, and links. Status codes are stored as
+`UNSET`, `OK`, or `ERROR`. Span events also continue to produce standalone log
+records, whose `trace_flags` contain the containing span's W3C trace flag bits.
+Resource and scope schema URLs are kept separately from user-supplied attributes.
+
 ### Configuration Examples
 
 <Tabs>
