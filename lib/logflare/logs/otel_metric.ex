@@ -59,6 +59,7 @@ defmodule Logflare.Logs.OtelMetric do
         "metric_type" => "gauge",
         "flags" => data_point.flags,
         "value" => value,
+        "exemplars" => handle_exemplars(data_point.exemplars),
         "start_time" => data_point.start_time_unix_nano,
         "attributes" => Otel.handle_attributes(data_point.attributes),
         "timestamp" => data_point.time_unix_nano
@@ -77,6 +78,7 @@ defmodule Logflare.Logs.OtelMetric do
         "aggregation_temporality" => temporality,
         "is_monotonic" => is_monotonic,
         "value" => value,
+        "exemplars" => handle_exemplars(data_point.exemplars),
         "start_time" => data_point.start_time_unix_nano,
         "attributes" => Otel.handle_attributes(data_point.attributes),
         "timestamp" => data_point.time_unix_nano
@@ -98,6 +100,7 @@ defmodule Logflare.Logs.OtelMetric do
         "max" => data_point.max,
         "bucket_counts" => data_point.bucket_counts,
         "explicit_bounds" => data_point.explicit_bounds,
+        "exemplars" => handle_exemplars(data_point.exemplars),
         "start_time" => data_point.start_time_unix_nano,
         "attributes" => Otel.handle_attributes(data_point.attributes),
         "timestamp" => data_point.time_unix_nano
@@ -122,6 +125,7 @@ defmodule Logflare.Logs.OtelMetric do
         "negative" => exponential_histogram_buckets(data_point.negative),
         "min" => data_point.min,
         "max" => data_point.max,
+        "exemplars" => handle_exemplars(data_point.exemplars),
         "start_time" => data_point.start_time_unix_nano,
         "attributes" => Otel.handle_attributes(data_point.attributes),
         "timestamp" => data_point.time_unix_nano
@@ -139,6 +143,19 @@ defmodule Logflare.Logs.OtelMetric do
 
   @spec recorded_value?(%{flags: non_neg_integer()}) :: boolean()
   defp recorded_value?(%{flags: flags}), do: Bitwise.band(flags, 1) == 0
+
+  @spec handle_exemplars([map()]) :: [map()]
+  defp handle_exemplars(exemplars) do
+    for %{value: {_, value}} = exemplar <- exemplars do
+      %{
+        "value" => Otel.extract_value(value),
+        "filtered_attributes" => Otel.handle_attributes(exemplar.filtered_attributes),
+        "time_unix_nano" => exemplar.time_unix_nano,
+        "span_id" => Base.encode16(exemplar.span_id, case: :lower),
+        "trace_id" => Base.encode16(exemplar.trace_id, case: :lower)
+      }
+    end
+  end
 
   @spec exponential_histogram_buckets(map() | nil) :: map()
   defp exponential_histogram_buckets(nil), do: %{"offset" => 0, "bucket_counts" => []}
