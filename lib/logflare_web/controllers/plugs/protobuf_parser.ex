@@ -7,6 +7,8 @@ defmodule LogflareWeb.ProtobufParser do
 
   @behaviour Plug.Parsers
 
+  alias LogflareWeb.OtlpJson
+
   def init(opts) do
     {body_reader, opts} = Keyword.pop(opts, :body_reader, {Plug.Conn, :read_body, []})
     {body_reader, opts}
@@ -43,7 +45,7 @@ defmodule LogflareWeb.ProtobufParser do
 
   def decode({:ok, body, conn}, :json) do
     protobuf_schema = Map.fetch!(conn.assigns, :protobuf_schema)
-    {:ok, data} = Protobuf.JSON.decode(body, protobuf_schema)
+    {:ok, data} = OtlpJson.decode(body, protobuf_schema)
     {:ok, data, conn}
   rescue
     e ->
