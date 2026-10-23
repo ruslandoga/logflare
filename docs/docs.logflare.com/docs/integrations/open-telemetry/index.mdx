@@ -101,3 +101,5 @@ docker compose -f docker-compose.yml -f docker-compose.pg.yml -f docker-compose.
 - Metric aggregation temporality accepts protobuf enum names and integer values. Unknown enum values are stored as `unspecified`.
 
 - Metric descriptions are stored in `description`, and metric-level metadata is stored in `metric_metadata` separately from Logflare event metadata.
+
+- Metric exemplars retain their values, timestamps, filtered attributes, and hexadecimal trace and span IDs. Exemplars without a value are omitted.
