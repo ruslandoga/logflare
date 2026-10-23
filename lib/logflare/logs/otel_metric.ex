@@ -38,9 +38,11 @@ defmodule Logflare.Logs.OtelMetric do
     end)
   end
 
-  def handle_metric(%_metric{name: name, unit: unit, data: data}, resource, scope) do
+  def handle_metric(%_metric{name: name, unit: unit, data: data} = metric, resource, scope) do
     base = %{
       "event_message" => name,
+      "description" => metric.description,
+      "metric_metadata" => Otel.handle_attributes(metric.metadata),
       "unit" => unit,
       "metadata" => %{"type" => "metric"},
       "scope" => scope,
@@ -52,49 +54,24 @@ defmodule Logflare.Logs.OtelMetric do
   end
 
   defp handle_metric_data({:gauge, %{data_points: data_points}}, base) do
-    event_message = base["event_message"]
-    unit = base["unit"]
-    metadata = base["metadata"]
-    scope = base["scope"]
-    resource = base["resource"]
-    project = base["project"]
-
     for %{value: {_, value}} = data_point <- data_points, recorded_value?(data_point) do
-      %{
-        "event_message" => event_message,
-        "unit" => unit,
-        "metadata" => metadata,
-        "scope" => scope,
-        "resource" => resource,
-        "project" => project,
+      Map.merge(base, %{
         "metric_type" => "gauge",
         "flags" => data_point.flags,
         "value" => value,
         "start_time" => data_point.start_time_unix_nano,
         "attributes" => Otel.handle_attributes(data_point.attributes),
         "timestamp" => data_point.time_unix_nano
-      }
+      })
     end
   end
 
   defp handle_metric_data({:sum, sum}, base) do
-    event_message = base["event_message"]
-    unit = base["unit"]
-    metadata = base["metadata"]
-    scope = base["scope"]
-    resource = base["resource"]
-    project = base["project"]
     temporality = aggregation_temporality(sum.aggregation_temporality)
     is_monotonic = sum.is_monotonic
 
     for %{value: {_, value}} = data_point <- sum.data_points, recorded_value?(data_point) do
-      %{
-        "event_message" => event_message,
-        "unit" => unit,
-        "metadata" => metadata,
-        "scope" => scope,
-        "resource" => resource,
-        "project" => project,
+      Map.merge(base, %{
         "metric_type" => "sum",
         "flags" => data_point.flags,
         "aggregation_temporality" => temporality,
@@ -103,27 +80,15 @@ defmodule Logflare.Logs.OtelMetric do
         "start_time" => data_point.start_time_unix_nano,
         "attributes" => Otel.handle_attributes(data_point.attributes),
         "timestamp" => data_point.time_unix_nano
-      }
+      })
     end
   end
 
   defp handle_metric_data({:histogram, histogram}, base) do
-    event_message = base["event_message"]
-    unit = base["unit"]
-    metadata = base["metadata"]
-    scope = base["scope"]
-    resource = base["resource"]
-    project = base["project"]
     temporality = aggregation_temporality(histogram.aggregation_temporality)
 
     for data_point <- histogram.data_points, recorded_value?(data_point) do
-      %{
-        "event_message" => event_message,
-        "unit" => unit,
-        "metadata" => metadata,
-        "scope" => scope,
-        "resource" => resource,
-        "project" => project,
+      Map.merge(base, %{
         "metric_type" => "histogram",
         "flags" => data_point.flags,
         "aggregation_temporality" => temporality,
@@ -136,27 +101,15 @@ defmodule Logflare.Logs.OtelMetric do
         "start_time" => data_point.start_time_unix_nano,
         "attributes" => Otel.handle_attributes(data_point.attributes),
         "timestamp" => data_point.time_unix_nano
-      }
+      })
     end
   end
 
   defp handle_metric_data({:exponential_histogram, histogram}, base) do
-    event_message = base["event_message"]
-    unit = base["unit"]
-    metadata = base["metadata"]
-    scope = base["scope"]
-    resource = base["resource"]
-    project = base["project"]
     temporality = aggregation_temporality(histogram.aggregation_temporality)
 
     for data_point <- histogram.data_points, recorded_value?(data_point) do
-      %{
-        "event_message" => event_message,
-        "unit" => unit,
-        "metadata" => metadata,
-        "scope" => scope,
-        "resource" => resource,
-        "project" => project,
+      Map.merge(base, %{
         "metric_type" => "exponential_histogram",
         "flags" => data_point.flags,
         "aggregation_temporality" => temporality,
@@ -172,7 +125,7 @@ defmodule Logflare.Logs.OtelMetric do
         "start_time" => data_point.start_time_unix_nano,
         "attributes" => Otel.handle_attributes(data_point.attributes),
         "timestamp" => data_point.time_unix_nano
-      }
+      })
     end
   end
 
