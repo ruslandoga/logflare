@@ -409,7 +409,9 @@ defmodule LogflareWeb.LogController do
   end
 
   defp protobuf_response({:error, :spool_unavailable}, conn, _success_response) do
-    send_proto_error(conn, 500, "Internal server error")
+    conn
+    |> put_resp_header("retry-after", @source_unavailable_retry_after)
+    |> send_proto_error(503, "Ingestion spool is unavailable. Send the batch again.")
   end
 
   defp protobuf_response({:error, errors}, conn, success_response) when is_list(errors) do

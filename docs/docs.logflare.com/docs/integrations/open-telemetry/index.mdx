@@ -43,6 +43,8 @@ OTLP JSON uses hexadecimal `traceId` values (32 characters) and `spanId` / `pare
 
 HTTP ingestion responses use the request encoding: `application/json` requests receive JSON, and `application/x-protobuf` requests receive binary protobuf. Ingestion errors use the same encoding for their Google RPC Status response.
 
+When the ingestion spool is temporarily unavailable, HTTP OTLP endpoints return `503 Service Unavailable` with `Retry-After: 5`. Exporters should retry the batch after that delay.
+
 ### Configuration Examples
 
 <Tabs>
