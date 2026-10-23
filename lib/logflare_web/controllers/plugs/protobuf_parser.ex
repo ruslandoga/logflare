@@ -12,15 +12,15 @@ defmodule LogflareWeb.ProtobufParser do
     {body_reader, opts}
   end
 
-  def parse(conn, "application", "x-protobuf", _headers, {{mod, fun, args}, _opts}) do
+  def parse(conn, "application", "x-protobuf", _headers, {{mod, fun, args}, opts}) do
     conn
-    |> then(&apply(mod, fun, [&1 | args]))
+    |> then(&apply(mod, fun, [&1, opts | args]))
     |> decode(:protobuf)
   end
 
-  def parse(conn, "application", "json", _headers, {{mod, fun, args}, _opts}) do
+  def parse(conn, "application", "json", _headers, {{mod, fun, args}, opts}) do
     conn
-    |> then(&apply(mod, fun, [&1 | args]))
+    |> then(&apply(mod, fun, [&1, opts | args]))
     |> decode(:json)
   end
 
