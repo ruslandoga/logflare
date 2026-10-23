@@ -18,6 +18,7 @@ defmodule LogflareWeb.LogController do
   alias LogflareWeb.OpenApi.Created
   alias LogflareWeb.OpenApi.ServerError
   alias LogflareWeb.OpenApiSchemas.LogsCreated
+  alias Plug.Conn.Utils, as: ConnUtils
 
   action_fallback(LogflareWeb.Api.FallbackController)
 
@@ -428,16 +429,37 @@ defmodule LogflareWeb.LogController do
   end
 
   defp send_proto_resp(conn, resp) do
-    payload = Protobuf.encode_to_iodata(resp)
-
-    conn
-    |> put_resp_content_type("application/x-protobuf")
-    |> send_resp(200, payload)
+    send_proto_response(conn, 200, resp)
   end
 
   defp send_proto_error(conn, status, error) do
     conn
-    |> send_resp(status, Protobuf.encode(%Google.Rpc.Status{message: error}))
+    |> send_proto_response(status, %Google.Rpc.Status{message: error})
     |> halt()
+  end
+
+  @spec send_proto_response(Plug.Conn.t(), Plug.Conn.status(), struct()) :: Plug.Conn.t()
+  defp send_proto_response(conn, status, resp) do
+    {content_type, payload} =
+      if json_request?(conn) do
+        {"application/json", Protobuf.JSON.encode!(resp)}
+      else
+        {"application/x-protobuf", Protobuf.encode_to_iodata(resp)}
+      end
+
+    conn
+    |> put_resp_content_type(content_type)
+    |> send_resp(status, payload)
+  end
+
+  @spec json_request?(Plug.Conn.t()) :: boolean()
+  defp json_request?(conn) do
+    case get_req_header(conn, "content-type") do
+      [content_type | _] ->
+        match?({:ok, "application", "json", _}, ConnUtils.media_type(content_type))
+
+      [] ->
+        false
+    end
   end
 end
