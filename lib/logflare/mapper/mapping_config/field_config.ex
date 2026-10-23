@@ -82,6 +82,8 @@ defmodule Logflare.Mapper.MappingConfig.FieldConfig do
 
     * `:precision` — target precision 0-9 (default `9` for nanoseconds). Integer inputs are
       auto-detected by digit count: 1-10 digits = seconds, 11-13 = ms, 14-16 = us, 17+ = ns.
+      Paths ending in `_unix_nano` or `UnixNano` explicitly use nanoseconds regardless of
+      digit count. Values beyond the signed 64-bit target range saturate at its boundary.
       ISO8601/RFC3339 strings are parsed via chrono.
 
   ### `enum8/2`

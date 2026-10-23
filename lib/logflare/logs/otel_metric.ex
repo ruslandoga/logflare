@@ -72,6 +72,8 @@ defmodule Logflare.Logs.OtelMetric do
         "exemplars" => handle_exemplars(data_point.exemplars),
         "start_time" => data_point.start_time_unix_nano,
         "attributes" => Otel.handle_attributes(data_point.attributes),
+        "time_unix_nano" => Otel.timestamp_or_nil(data_point.time_unix_nano),
+        "start_time_unix_nano" => Otel.timestamp_or_nil(data_point.start_time_unix_nano),
         "timestamp" => data_point.time_unix_nano
       })
     end
@@ -91,6 +93,8 @@ defmodule Logflare.Logs.OtelMetric do
         "exemplars" => handle_exemplars(data_point.exemplars),
         "start_time" => data_point.start_time_unix_nano,
         "attributes" => Otel.handle_attributes(data_point.attributes),
+        "time_unix_nano" => Otel.timestamp_or_nil(data_point.time_unix_nano),
+        "start_time_unix_nano" => Otel.timestamp_or_nil(data_point.start_time_unix_nano),
         "timestamp" => data_point.time_unix_nano
       })
     end
@@ -113,6 +117,8 @@ defmodule Logflare.Logs.OtelMetric do
         "exemplars" => handle_exemplars(data_point.exemplars),
         "start_time" => data_point.start_time_unix_nano,
         "attributes" => Otel.handle_attributes(data_point.attributes),
+        "time_unix_nano" => Otel.timestamp_or_nil(data_point.time_unix_nano),
+        "start_time_unix_nano" => Otel.timestamp_or_nil(data_point.start_time_unix_nano),
         "timestamp" => data_point.time_unix_nano
       })
     end
@@ -138,6 +144,8 @@ defmodule Logflare.Logs.OtelMetric do
         "exemplars" => handle_exemplars(data_point.exemplars),
         "start_time" => data_point.start_time_unix_nano,
         "attributes" => Otel.handle_attributes(data_point.attributes),
+        "time_unix_nano" => Otel.timestamp_or_nil(data_point.time_unix_nano),
+        "start_time_unix_nano" => Otel.timestamp_or_nil(data_point.start_time_unix_nano),
         "timestamp" => data_point.time_unix_nano
       })
     end

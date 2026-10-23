@@ -67,7 +67,8 @@ defmodule Logflare.Logs.OtelLog do
       "trace_flags" => Bitwise.band(log_record.flags, 0xFF),
       "trace_id" => Base.encode16(log_record.trace_id, case: :lower),
       "span_id" => Base.encode16(log_record.span_id, case: :lower),
-      "observed_time_unix_nano" => log_record.observed_time_unix_nano
+      "time_unix_nano" => Otel.timestamp_or_nil(log_record.time_unix_nano),
+      "observed_time_unix_nano" => Otel.timestamp_or_nil(log_record.observed_time_unix_nano)
     })
     |> put_timestamp(log_record)
   end

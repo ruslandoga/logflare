@@ -6,6 +6,7 @@ use crate::coerce;
 use crate::mapping::{
     CompiledField, CompiledMapping, Enum8Data, FieldType, PathSource, Predicate, PredicateValue,
 };
+use crate::path::{CompiledPath, PathSegment};
 use crate::query;
 
 use serde::ser::{SerializeMap, SerializeSeq};
@@ -114,6 +115,7 @@ pub fn map_values_into<'a>(
                     flat_keys,
                     query_cache,
                     |elem| {
+                        let elem = nanosecond_value(env, elem, path, &field.field_type, nil);
                         coerce::coerce_array_element(
                             env,
                             elem,
@@ -224,6 +226,29 @@ pub fn map_values_into<'a>(
     }
 }
 
+fn nanosecond_value<'a>(
+    env: Env<'a>,
+    value: Term<'a>,
+    path: &CompiledPath,
+    field_type: &FieldType,
+    nil: Term<'a>,
+) -> Term<'a> {
+    if value != nil
+        && matches!(
+            field_type,
+            FieldType::DateTime64 { .. } | FieldType::ArrayDateTime64 { .. }
+        )
+        && matches!(
+            path.segments.last(),
+            Some(PathSegment::Key(key)) if key.ends_with("_unix_nano") || key.ends_with("UnixNano")
+        )
+    {
+        (value, 9u8).encode(env)
+    } else {
+        value
+    }
+}
+
 /// Resolve the source value without applying defaults (for enum8 fields).
 fn resolve_value_raw<'a>(
     env: Env<'a>,
@@ -286,11 +311,23 @@ fn resolve_value<'a>(
             let v = query::evaluate(env, body, path, nil, flat_keys, cache);
             if v == nil || !options.accepts(v) {
                 coerce::encode_default(env, &field.default, nil)
+            } else if matches!(field.field_type, FieldType::DateTime64 { .. }) {
+                nanosecond_value(env, v, path, &field.field_type, nil)
             } else {
                 v
             }
         }
         PathSource::Coalesce(paths) => {
+            if matches!(field.field_type, FieldType::DateTime64 { .. }) {
+                return paths
+                    .iter()
+                    .find_map(|path| {
+                        let value = query::evaluate(env, body, path, nil, flat_keys, cache);
+                        (value != nil && options.accepts(value))
+                            .then(|| nanosecond_value(env, value, path, &field.field_type, nil))
+                    })
+                    .unwrap_or_else(|| coerce::encode_default(env, &field.default, nil));
+            }
             let result = query::evaluate_first(env, body, paths, options, nil, flat_keys, cache);
             if result == nil {
                 coerce::encode_default(env, &field.default, nil)

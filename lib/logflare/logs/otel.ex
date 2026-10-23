@@ -113,4 +113,8 @@ defmodule Logflare.Logs.Otel do
   def handle_attributes(attributes) do
     Map.new(attributes, &extract_key_value/1)
   end
+
+  @spec timestamp_or_nil(non_neg_integer()) :: pos_integer() | nil
+  def timestamp_or_nil(0), do: nil
+  def timestamp_or_nil(timestamp), do: timestamp
 end

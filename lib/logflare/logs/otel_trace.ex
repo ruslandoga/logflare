@@ -68,6 +68,9 @@ defmodule Logflare.Logs.OtelTrace do
         "kind" => span_kind(span.kind),
         "start_time" => span.start_time_unix_nano,
         "end_time" => span.end_time_unix_nano,
+        "time_unix_nano" => Otel.timestamp_or_nil(span.start_time_unix_nano),
+        "start_time_unix_nano" => Otel.timestamp_or_nil(span.start_time_unix_nano),
+        "end_time_unix_nano" => Otel.timestamp_or_nil(span.end_time_unix_nano),
         "attributes" => Otel.handle_attributes(span.attributes),
         "dropped_attributes_count" => span.dropped_attributes_count,
         "events" => events,
@@ -94,6 +97,7 @@ defmodule Logflare.Logs.OtelTrace do
       "trace_flags" => Bitwise.band(span.flags, 255),
       "attributes" => event["attributes"],
       "dropped_attributes_count" => event["dropped_attributes_count"],
+      "time_unix_nano" => Otel.timestamp_or_nil(event["time_unix_nano"]),
       "timestamp" => event["time_unix_nano"],
       "project" => Otel.resource_project(base_event["resource"])
     })
