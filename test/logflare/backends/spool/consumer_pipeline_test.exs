@@ -396,6 +396,7 @@ defmodule Logflare.Backends.Spool.ConsumerPipelineTest do
       SpoolAck.bump(success_handle, 1)
       SpoolAck.register(failed_handle, QueueMod, "queue-url")
       SpoolAck.bump(failed_handle, 1)
+      on_exit(fn -> :ets.delete(:spool_ack, failed_handle) end)
 
       test_pid = self()
       stub(QueueMod, :ack, fn url, h -> send(test_pid, {:acked, url, h}) end)
