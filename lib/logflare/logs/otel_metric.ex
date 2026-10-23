@@ -12,15 +12,35 @@ defmodule Logflare.Logs.OtelMetric do
   represent missing observations rather than numeric samples.
   """
 
+  @behaviour Logflare.Logs.Processor
+
   require Logger
 
   alias Logflare.Logs.Otel
+  alias Logflare.Logs.Processor
 
-  @behaviour Logflare.Logs.Processor
+  @typep point_status :: :recorded | :omitted | {:rejected, String.t()}
 
+  @impl true
   def handle_batch(resource_metrics, _source) when is_list(resource_metrics) do
     resource_metrics
     |> Enum.flat_map(&handle_resource_metrics(&1))
+  end
+
+  @impl true
+  @spec handle_batch_with_report([map()], Logflare.Sources.Source.t() | nil) ::
+          {[map()], Processor.ingest_report()}
+  def handle_batch_with_report(resource_metrics, source) when is_list(resource_metrics) do
+    events = handle_batch(resource_metrics, source)
+
+    errors =
+      for resource <- resource_metrics,
+          scope <- resource.scope_metrics,
+          metric <- scope.metrics,
+          message <- metric_rejections(metric.data),
+          do: message
+
+    {events, %{rejected: length(errors), errors: errors}}
   end
 
   def handle_resource_metrics(%_resource_metrics{
@@ -64,7 +84,8 @@ defmodule Logflare.Logs.OtelMetric do
   end
 
   defp handle_metric_data({:gauge, %{data_points: data_points}}, base) do
-    for %{value: {_, value}} = data_point <- data_points, recorded_value?(data_point) do
+    for %{value: {_, value}} = data_point <- data_points,
+        point_status(:gauge, data_point) == :recorded do
       Map.merge(base, %{
         "metric_type" => "gauge",
         "flags" => data_point.flags,
@@ -83,7 +104,8 @@ defmodule Logflare.Logs.OtelMetric do
     temporality = aggregation_temporality(sum.aggregation_temporality)
     is_monotonic = sum.is_monotonic
 
-    for %{value: {_, value}} = data_point <- sum.data_points, recorded_value?(data_point) do
+    for %{value: {_, value}} = data_point <- sum.data_points,
+        point_status(:sum, data_point) == :recorded do
       Map.merge(base, %{
         "metric_type" => "sum",
         "flags" => data_point.flags,
@@ -103,7 +125,7 @@ defmodule Logflare.Logs.OtelMetric do
   defp handle_metric_data({:histogram, histogram}, base) do
     temporality = aggregation_temporality(histogram.aggregation_temporality)
 
-    for data_point <- histogram.data_points, recorded_value?(data_point) do
+    for data_point <- histogram.data_points, point_status(:histogram, data_point) == :recorded do
       Map.merge(base, %{
         "metric_type" => "histogram",
         "flags" => data_point.flags,
@@ -127,7 +149,8 @@ defmodule Logflare.Logs.OtelMetric do
   defp handle_metric_data({:exponential_histogram, histogram}, base) do
     temporality = aggregation_temporality(histogram.aggregation_temporality)
 
-    for data_point <- histogram.data_points, recorded_value?(data_point) do
+    for data_point <- histogram.data_points,
+        point_status(:exponential_histogram, data_point) == :recorded do
       Map.merge(base, %{
         "metric_type" => "exponential_histogram",
         "flags" => data_point.flags,
@@ -161,6 +184,29 @@ defmodule Logflare.Logs.OtelMetric do
 
   @spec recorded_value?(%{flags: non_neg_integer()}) :: boolean()
   defp recorded_value?(%{flags: flags}), do: Bitwise.band(flags, 1) == 0
+
+  @spec point_status(atom(), map()) :: point_status()
+  defp point_status(type, point) do
+    if recorded_value?(point), do: recorded_point_status(type, point), else: :omitted
+  end
+
+  @spec recorded_point_status(atom(), map()) :: point_status()
+  defp recorded_point_status(type, %{value: nil}) when type in [:gauge, :sum],
+    do: {:rejected, "Metric data point has no numeric value."}
+
+  defp recorded_point_status(type, _point)
+       when type in [:gauge, :sum, :histogram, :exponential_histogram],
+       do: :recorded
+
+  defp recorded_point_status(type, _point),
+    do: {:rejected, "Unsupported metric type #{inspect(type)}."}
+
+  @spec metric_rejections(nil | {atom(), map()}) :: [String.t()]
+  defp metric_rejections(nil), do: []
+
+  defp metric_rejections({type, %{data_points: points}}) do
+    for point <- points, {:rejected, message} <- [point_status(type, point)], do: message
+  end
 
   @spec handle_exemplars([map()]) :: [map()]
   defp handle_exemplars(exemplars) do

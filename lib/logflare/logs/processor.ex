@@ -17,6 +17,9 @@ defmodule Logflare.Logs.Processor do
   Translate `data` into format that will be used for storage.
   """
   @callback handle_batch(data :: [map()], source :: Logflare.Sources.Source.t()) :: [map()]
+  @callback handle_batch_with_report(data :: [map()], source :: Source.t()) ::
+              {[map()], ingest_report()}
+  @optional_callbacks handle_batch_with_report: 2
 
   @doc """
   Process `data` using `processor` to translate from incoming format to storage format.
@@ -66,9 +69,9 @@ defmodule Logflare.Logs.Processor do
     }
 
     :telemetry.span([:logflare, :logs, :processor, :ingest], metadata, fn ->
-      batch =
+      {batch, conversion_report} =
         :telemetry.span([:logflare, :logs, :processor, :ingest, :handle_batch], metadata, fn ->
-          {processor.handle_batch(data, source), metadata}
+          {convert_batch(data, processor, source, result_format), metadata}
         end)
 
       :telemetry.execute(
@@ -84,7 +87,7 @@ defmodule Logflare.Logs.Processor do
         # point (every log_controller.ex/gRPC ingestion action funnels
         # through here), as opposed to SourceRouter's re-entrant calls,
         # which never pass this and so can never be spooled.
-        result = store_batch(batch, processor, source, result_format)
+        result = store_batch(batch, processor, source, result_format, conversion_report)
 
         new_meta = Map.merge(metadata, %{success: elem(result, 0) == :ok})
 
@@ -93,18 +96,32 @@ defmodule Logflare.Logs.Processor do
     end)
   end
 
-  @spec store_batch([map()], module(), Source.t(), :legacy | :report) ::
+  @spec convert_batch([map()], module(), Source.t(), :legacy | :report) ::
+          {[map()], ingest_report()}
+  defp convert_batch(data, processor, source, :legacy),
+    do: {processor.handle_batch(data, source), %{rejected: 0, errors: []}}
+
+  defp convert_batch(data, processor, source, :report) do
+    Code.ensure_loaded!(processor)
+
+    if function_exported?(processor, :handle_batch_with_report, 2),
+      do: processor.handle_batch_with_report(data, source),
+      else: convert_batch(data, processor, source, :legacy)
+  end
+
+  @spec store_batch([map()], module(), Source.t(), :legacy | :report, ingest_report()) ::
           {:ok, non_neg_integer() | ingest_report()} | {:error, term()}
-  defp store_batch(batch, _processor, source, :legacy),
+  defp store_batch(batch, _processor, source, :legacy, _conversion_report),
     do: Backends.ingest_logs(batch, source, nil, true)
 
-  defp store_batch(batch, processor, source, :report) do
+  defp store_batch(batch, processor, source, :report, conversion_report) do
     with {:ok, %{rejections: rejections}} <-
            Backends.ingest_logs_with_rejections(batch, source, nil, true) do
       {:ok,
        %{
-         rejected: rejected_units(batch, processor, rejections),
-         errors: Enum.map(rejections, fn {_index, message} -> message end)
+         rejected: conversion_report.rejected + rejected_units(batch, processor, rejections),
+         errors:
+           conversion_report.errors ++ Enum.map(rejections, fn {_index, message} -> message end)
        }}
     end
   end
