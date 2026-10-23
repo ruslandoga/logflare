@@ -53,6 +53,8 @@ failure returns `INTERNAL` instead of a successful acknowledgement.
 
 ### Validation responses
 
+Unexpected ingestion failures return HTTP `500` with a Google RPC Status body in the request encoding. They never return a successful acknowledgement of the batch.
+
 OTLP/HTTP and OTLP/gRPC responses include `partial_success` when validation rejects
 telemetry. The response reports the number of rejected log records, metric data
 points, or spans, plus an error message. A span counts once if either its span

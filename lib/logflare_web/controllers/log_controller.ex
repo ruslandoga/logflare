@@ -2,8 +2,6 @@ defmodule LogflareWeb.LogController do
   use LogflareWeb, :controller
   use OpenApiSpex.ControllerSpecs
 
-  require Logger
-
   alias Logflare.Backends
   alias Logflare.Logs
   alias Logflare.Logs.OtlpResponse
@@ -420,20 +418,8 @@ defmodule LogflareWeb.LogController do
     |> send_proto_error(503, "Ingestion spool is unavailable. Send the batch again.")
   end
 
-  defp protobuf_response({:error, errors}, conn, success_response) when is_list(errors) do
-    source = conn.assigns.source
-
-    Logger.warning("OTLP ingest rejected #{length(errors)} event(s) at validation",
-      source_token: source.token,
-      source_id: source.id,
-      sample_errors: errors |> Enum.uniq() |> Enum.take(3)
-    )
-
-    send_proto_resp(conn, success_response)
-  end
-
-  defp protobuf_response(_, conn, success_response) do
-    send_proto_resp(conn, success_response)
+  defp protobuf_response(_unexpected, conn, _success_response) do
+    send_proto_error(conn, 500, "Internal server error")
   end
 
   defp send_proto_resp(conn, resp) do
