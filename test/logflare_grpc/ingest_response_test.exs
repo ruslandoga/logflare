@@ -31,7 +31,7 @@ defmodule LogflareGrpc.IngestResponseTest do
          :random_export_service_request}
       ] do
     test "#{signal} returns UNAVAILABLE when the spool producer fails", %{channel: channel} do
-      Mimic.stub(Backends, :ingest_logs, fn _batch, _source, _backend, true ->
+      Mimic.stub(Backends, :ingest_logs_with_rejections, fn _batch, _source, _backend, true ->
         {:error, :spool_unavailable}
       end)
 
@@ -43,7 +43,7 @@ defmodule LogflareGrpc.IngestResponseTest do
     end
 
     test "#{signal} returns INTERNAL for an unexpected ingest failure", %{channel: channel} do
-      Mimic.stub(Backends, :ingest_logs, fn _batch, _source, _backend, true ->
+      Mimic.stub(Backends, :ingest_logs_with_rejections, fn _batch, _source, _backend, true ->
         {:error, :unexpected_failure}
       end)
 

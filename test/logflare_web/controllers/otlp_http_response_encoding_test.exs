@@ -16,7 +16,11 @@ defmodule LogflareWeb.OtlpHttpResponseEncodingTest do
 
   setup do
     stub(Backends, :start_for_ingest, fn _source -> :ok end)
-    stub(Backends, :ingest_logs, fn [], _source, nil, true -> {:ok, 0} end)
+
+    stub(Backends, :ingest_logs_with_rejections, fn [], _source, nil, true ->
+      {:ok, %{accepted: 0, rejections: []}}
+    end)
+
     :ok
   end
 
