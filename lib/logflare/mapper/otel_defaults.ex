@@ -57,8 +57,8 @@ defmodule Logflare.Mapper.OtelDefaults do
 
   @type output_format() :: :ch_row_binary | :ndjson | :map
 
-  @log_config_id "00000000-0000-0000-0001-000000000005"
-  @metric_config_id "00000000-0000-0000-0002-000000000005"
+  @log_config_id "00000000-0000-0000-0001-000000000006"
+  @metric_config_id "00000000-0000-0000-0002-000000000006"
   @trace_config_id "00000000-0000-0000-0003-000000000006"
 
   @attributes_exclude_keys ["id", "event_message", "source", "timestamp"]
@@ -185,10 +185,10 @@ defmodule Logflare.Mapper.OtelDefaults do
         ]
       ),
       Field.string("scope_schema_url",
-        paths: ["$.scope.schema_url"]
+        paths: ["$.scope_schema_url", "$.scope.schema_url"]
       ),
       Field.string("resource_schema_url",
-        paths: ["$.resource.schema_url"]
+        paths: ["$.resource_schema_url", "$.resource.schema_url"]
       ),
       resource_attributes_field(:log),
       Field.flat_map("scope_attributes",
@@ -294,10 +294,10 @@ defmodule Logflare.Mapper.OtelDefaults do
         ]
       ),
       Field.string("scope_schema_url",
-        paths: ["$.scope.schema_url"]
+        paths: ["$.scope_schema_url", "$.scope.schema_url"]
       ),
       Field.string("resource_schema_url",
-        paths: ["$.resource.schema_url"]
+        paths: ["$.resource_schema_url", "$.resource.schema_url"]
       ),
       resource_attributes_field(:metric),
       Field.flat_map("scope_attributes",

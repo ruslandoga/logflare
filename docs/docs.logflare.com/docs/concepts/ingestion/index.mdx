@@ -147,6 +147,8 @@ OTLP log timestamps use the occurrence time when present, otherwise the observat
 
 OTLP logs retain `event_name`, `dropped_attributes_count`, and the raw `flags` bitmask. `trace_flags` contains the low eight flag bits. Numeric severity values, including unknown future enum values, are retained in the converted event.
 
+OTLP resource and scope schema URLs are retained separately as `resource_schema_url` and `scope_schema_url`, without overwriting attributes named `schema_url`. Resource and scope dropped-attribute counts are retained as `resource_dropped_attributes_count` and `scope.dropped_attributes_count`.
+
 ## Pipeline Transformations
 
 At ingestion, the pipeline will perform the following in sequence:

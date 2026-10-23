@@ -25,15 +25,25 @@ defmodule Logflare.Logs.OtelMetric do
 
   def handle_resource_metrics(%_resource_metrics{
         resource: resource,
-        scope_metrics: scope_metrics
+        scope_metrics: scope_metrics,
+        schema_url: resource_schema_url
       }) do
+    resource_dropped_attributes_count = Map.get(resource || %{}, :dropped_attributes_count, 0)
     resource = Otel.handle_resource(resource)
 
     Enum.flat_map(scope_metrics, fn scope_metric ->
       scope = Otel.handle_scope(scope_metric.scope)
 
+      metadata = %{
+        "resource_schema_url" => resource_schema_url,
+        "scope_schema_url" => scope_metric.schema_url,
+        "resource_dropped_attributes_count" => resource_dropped_attributes_count
+      }
+
       Enum.flat_map(scope_metric.metrics, fn metric ->
-        handle_metric(metric, resource, scope)
+        metric
+        |> handle_metric(resource, scope)
+        |> Enum.map(&Map.merge(&1, metadata))
       end)
     end)
   end
