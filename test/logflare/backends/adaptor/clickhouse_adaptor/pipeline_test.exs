@@ -1507,6 +1507,7 @@ defmodule Logflare.Backends.Adaptor.ClickHouseAdaptor.PipelineTest do
       handle = "spool-handle-#{System.unique_integer([:positive])}"
       SpoolAck.register(handle, QueueMod, "queue-url")
       SpoolAck.bump(handle, 1)
+      on_exit(fn -> :ets.delete(:spool_ack, handle) end)
 
       test_pid = self()
       stub(QueueMod, :ack, fn url, h -> send(test_pid, {:acked, url, h}) end)
