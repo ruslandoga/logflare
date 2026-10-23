@@ -238,7 +238,7 @@ defmodule LogflareWeb.LogControllerTest do
           {:otel_traces, ExportTraceServiceRequest, ExportTraceServiceResponse},
           {:otel_logs, ExportLogsServiceRequest, ExportLogsServiceResponse}
         ] do
-      test "#{path} returns 500 when the spool producer is unavailable", %{
+      test "#{path} returns 503 when the spool producer is unavailable", %{
         conn: conn,
         source: source,
         user: user
@@ -265,7 +265,8 @@ defmodule LogflareWeb.LogControllerTest do
           |> put_req_header("content-type", "application/x-protobuf")
           |> post(Routes.log_path(conn, unquote(path)), body)
 
-        assert conn.status == 500
+        assert conn.status == 503
+        assert get_resp_header(conn, "retry-after") == ["5"]
       end
     end
 
