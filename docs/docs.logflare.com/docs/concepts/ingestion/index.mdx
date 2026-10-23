@@ -139,6 +139,8 @@ Route a request **either** with the `source`/`source_name` query parameter **or*
 
 OTLP logs, metrics, and traces can omit the resource and instrumentation scope messages. Logflare treats omitted context as empty context and accepts empty export batches.
 
+Scalar or array resource attributes named `service` are accepted. Project extraction uses a nested `service.name` when available, then the flat `service.name` attribute.
+
 ## Pipeline Transformations
 
 At ingestion, the pipeline will perform the following in sequence:
