@@ -42,7 +42,8 @@ defmodule Logflare.Logs.OtelLog do
   end
 
   defp handle_log_record(%LogRecord{} = log_record, base_event) do
-    Map.merge(base_event, %{
+    base_event
+    |> Map.merge(%{
       "event_message" => event_message(log_record),
       "body" => Otel.extract_value(log_record.body),
       "attributes" => Otel.handle_attributes(log_record.attributes),
@@ -50,8 +51,19 @@ defmodule Logflare.Logs.OtelLog do
       "severity_text" => log_record.severity_text,
       "trace_id" => Base.encode16(log_record.trace_id, case: :lower),
       "span_id" => Base.encode16(log_record.span_id, case: :lower),
-      "timestamp" => log_record.time_unix_nano
+      "observed_time_unix_nano" => log_record.observed_time_unix_nano
     })
+    |> put_timestamp(log_record)
+  end
+
+  @spec put_timestamp(map(), LogRecord.t()) :: map()
+  defp put_timestamp(event, log_record) do
+    timestamp =
+      if log_record.time_unix_nano == 0,
+        do: log_record.observed_time_unix_nano,
+        else: log_record.time_unix_nano
+
+    if timestamp == 0, do: event, else: Map.put(event, "timestamp", timestamp)
   end
 
   defp event_message(%{body: %{value: {:string_value, body}}}) do

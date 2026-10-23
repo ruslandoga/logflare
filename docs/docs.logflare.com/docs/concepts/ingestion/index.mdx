@@ -143,6 +143,8 @@ Scalar or array resource attributes named `service` are accepted. Project extrac
 
 OTLP byte values are represented as Base64 strings, including bytes nested in arrays and attribute maps. String values remain unchanged.
 
+OTLP log timestamps use the occurrence time when present, otherwise the observation time. When both are omitted, Logflare infers the receive time. The observation time is also retained in `observed_time_unix_nano`.
+
 ## Pipeline Transformations
 
 At ingestion, the pipeline will perform the following in sequence:
