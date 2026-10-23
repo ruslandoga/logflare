@@ -139,6 +139,22 @@ jobs:
             mix-v6-${{ runner.os }}-${{ runner.arch }}-${{ needs.versions.outputs.erlang }}-${{ needs.versions.outputs.elixir }}-${{ needs.versions.outputs.rust }}-${{ env.MIX_ENV }}-${{ needs.versions.outputs.mix_deps_hash }}-
             mix-v6-${{ runner.os }}-${{ runner.arch }}-${{ needs.versions.outputs.erlang }}-${{ needs.versions.outputs.elixir }}-${{ needs.versions.outputs.rust }}-${{ env.MIX_ENV }}-
 
+      # Seed v6 from the verified main build while main still publishes v5 caches.
+      - name: Restore compatible legacy Mix cache
+        if: >-
+          steps.mix_cache.outputs.cache-matched-key == '' &&
+          runner.os == 'Linux' && runner.arch == 'X64' && env.MIX_ENV == 'test' &&
+          needs.versions.outputs.erlang == '27.3.4.6' &&
+          needs.versions.outputs.elixir == '1.19.5-otp-27' &&
+          needs.versions.outputs.rust == '1.96.0'
+        uses: actions/cache/restore@v5
+        with:
+          path: |
+            deps
+            _build
+            priv/native
+          key: mix-v5-Linux-27.3.4.6-1.19.5-otp-27-compile-b3fd80776347d961a976224ab9962f42e07aac50b776554aca129db77d126aaf-a1622d4f557ae2cf355ed1958f4bd17cded47cb77582ca18bd2a9108d135b794
+
       - name: Prepare in-app docs
         run: |
           rm -rf priv/docs
@@ -265,6 +281,22 @@ jobs:
             mix-v6-${{ runner.os }}-${{ runner.arch }}-${{ needs.versions.outputs.erlang }}-${{ needs.versions.outputs.elixir }}-${{ needs.versions.outputs.rust }}-${{ env.MIX_ENV }}-${{ needs.versions.outputs.mix_deps_hash }}-
             mix-v6-${{ runner.os }}-${{ runner.arch }}-${{ needs.versions.outputs.erlang }}-${{ needs.versions.outputs.elixir }}-${{ needs.versions.outputs.rust }}-${{ env.MIX_ENV }}-
 
+      # Seed v6 from the verified main build while main still publishes v5 caches.
+      - name: Restore compatible legacy Mix cache
+        if: >-
+          steps.mix_cache.outputs.cache-matched-key == '' &&
+          runner.os == 'Linux' && runner.arch == 'X64' && env.MIX_ENV == 'test' &&
+          needs.versions.outputs.erlang == '27.3.4.6' &&
+          needs.versions.outputs.elixir == '1.19.5-otp-27' &&
+          needs.versions.outputs.rust == '1.96.0'
+        uses: actions/cache/restore@v5
+        with:
+          path: |
+            deps
+            _build
+            priv/native
+          key: mix-v5-Linux-27.3.4.6-1.19.5-otp-27-compile-b3fd80776347d961a976224ab9962f42e07aac50b776554aca129db77d126aaf-a1622d4f557ae2cf355ed1958f4bd17cded47cb77582ca18bd2a9108d135b794
+
       - name: Prepare in-app docs
         run: |
           rm -rf priv/docs
@@ -382,6 +414,22 @@ jobs:
           restore-keys: |
             mix-v6-${{ runner.os }}-${{ runner.arch }}-${{ needs.versions.outputs.erlang }}-${{ needs.versions.outputs.elixir }}-${{ needs.versions.outputs.rust }}-${{ env.MIX_ENV }}-${{ needs.versions.outputs.mix_deps_hash }}-
             mix-v6-${{ runner.os }}-${{ runner.arch }}-${{ needs.versions.outputs.erlang }}-${{ needs.versions.outputs.elixir }}-${{ needs.versions.outputs.rust }}-${{ env.MIX_ENV }}-
+
+      # Seed v6 from the verified main build while main still publishes v5 caches.
+      - name: Restore compatible legacy Mix cache
+        if: >-
+          steps.mix_cache.outputs.cache-matched-key == '' &&
+          runner.os == 'Linux' && runner.arch == 'X64' && env.MIX_ENV == 'test' &&
+          needs.versions.outputs.erlang == '27.3.4.6' &&
+          needs.versions.outputs.elixir == '1.19.5-otp-27' &&
+          needs.versions.outputs.rust == '1.96.0'
+        uses: actions/cache/restore@v5
+        with:
+          path: |
+            deps
+            _build
+            priv/native
+          key: mix-v5-Linux-27.3.4.6-1.19.5-otp-27-compile-b3fd80776347d961a976224ab9962f42e07aac50b776554aca129db77d126aaf-a1622d4f557ae2cf355ed1958f4bd17cded47cb77582ca18bd2a9108d135b794
 
       - name: Prepare in-app docs
         run: |
