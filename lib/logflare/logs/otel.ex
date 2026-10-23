@@ -93,9 +93,15 @@ defmodule Logflare.Logs.Otel do
   end
 
   def extract_value(%AnyValue{value: {:bytes_value, value}}), do: Base.encode64(value)
+  def extract_value(%AnyValue{value: {:double_value, :nan}}), do: "NaN"
+  def extract_value(%AnyValue{value: {:double_value, :infinity}}), do: "Infinity"
+  def extract_value(%AnyValue{value: {:double_value, :negative_infinity}}), do: "-Infinity"
 
   def extract_value(%_{value: {_type, value}}), do: value
   def extract_value(%_{value: nil}), do: nil
+  def extract_value(:nan), do: "NaN"
+  def extract_value(:infinity), do: "Infinity"
+  def extract_value(:negative_infinity), do: "-Infinity"
   def extract_value(nil), do: nil
   def extract_value(value), do: value
 

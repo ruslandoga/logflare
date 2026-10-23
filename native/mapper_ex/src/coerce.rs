@@ -407,7 +407,15 @@ fn coerce_float64<'a>(env: Env<'a>, value: Term<'a>) -> Term<'a> {
     if let Ok(binary) = value.decode::<Binary>() {
         if let Ok(s) = std::str::from_utf8(binary.as_slice()) {
             if let Ok(f) = s.parse::<f64>() {
-                return f.encode(env);
+                return if f.is_finite() {
+                    f.encode(env)
+                } else if f.is_nan() {
+                    crate::encode_string(env, "NaN")
+                } else if f.is_sign_negative() {
+                    crate::encode_string(env, "-Infinity")
+                } else {
+                    crate::encode_string(env, "Infinity")
+                };
             }
         }
     }
