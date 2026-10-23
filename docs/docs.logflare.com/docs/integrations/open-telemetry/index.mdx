@@ -21,6 +21,12 @@ Supported ingestion formats:
 
 Non-finite numeric values are represented as the strings `"NaN"`, `"Infinity"`, and `"-Infinity"` in converted event bodies and JSON output. ClickHouse numeric columns retain their IEEE 754 non-finite Float64 values when encoded as RowBinary.
 
+### Trace event correlation
+
+Trace and span IDs use lowercase hexadecimal. Standalone log records created from
+span events include the containing span's `span_id` and `trace_id`, so you can
+correlate those event logs with their traces.
+
 ### Configuration Examples
 
 <Tabs>
