@@ -51,9 +51,26 @@ defmodule Logflare.Logs.OtelTraceTest do
       le_event = Enum.find(batch, fn params -> params["metadata"]["type"] == "event" end)
 
       assert le_event["event_message"] == event.name
-      assert le_event["parent_span_id"] == Base.encode16(span.span_id)
+      assert le_event["parent_span_id"] == le_span["span_id"]
+      assert le_event["span_id"] == le_span["span_id"]
 
       assert le_event["timestamp"] == event.time_unix_nano
+    end
+
+    test "span events correlate with their containing span using lowercase hexadecimal IDs", %{
+      resource_spans: [resource],
+      source: source
+    } do
+      [scope] = resource.scope_spans
+      [span] = scope.spans
+      span = %{span | span_id: <<0xAB, 0::56>>, trace_id: <<0xCD, 0::120>>}
+      resources = [%{resource | scope_spans: [%{scope | spans: [span]}]}]
+
+      assert [converted_span, converted_event] = OtelTrace.handle_batch(resources, source)
+      assert converted_span["span_id"] == "ab00000000000000"
+      assert converted_event["span_id"] == converted_span["span_id"]
+      assert converted_event["parent_span_id"] == converted_span["span_id"]
+      assert converted_event["trace_id"] == converted_span["trace_id"]
     end
 
     test "maps each OTEL span kind to its canonical low-cardinality value", %{source: source} do
