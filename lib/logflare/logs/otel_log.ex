@@ -10,16 +10,15 @@ defmodule Logflare.Logs.OtelLog do
   string. When it is something else, it is derived from the log `event_name`.
   """
 
-  alias Logflare.Logs.Otel
-
-  alias Opentelemetry.Proto.Logs.V1.ResourceLogs
-  alias Opentelemetry.Proto.Logs.V1.ScopeLogs
-  alias Opentelemetry.Proto.Logs.V1.LogRecord
-
-  alias Opentelemetry.Proto.Logs.V1.SeverityNumber
-
   @behaviour Logflare.Logs.Processor
 
+  alias Logflare.Logs.Otel
+  alias Opentelemetry.Proto.Logs.V1.LogRecord
+  alias Opentelemetry.Proto.Logs.V1.ResourceLogs
+  alias Opentelemetry.Proto.Logs.V1.ScopeLogs
+  alias Opentelemetry.Proto.Logs.V1.SeverityNumber
+
+  @impl true
   def handle_batch(resource_logs, _source) when is_list(resource_logs) do
     Enum.flat_map(resource_logs, &handle_resource_logs/1)
   end
@@ -45,10 +44,14 @@ defmodule Logflare.Logs.OtelLog do
     base_event
     |> Map.merge(%{
       "event_message" => event_message(log_record),
+      "event_name" => log_record.event_name,
       "body" => Otel.extract_value(log_record.body),
       "attributes" => Otel.handle_attributes(log_record.attributes),
-      "severity_number" => SeverityNumber.value(log_record.severity_number),
+      "dropped_attributes_count" => log_record.dropped_attributes_count,
+      "severity_number" => severity_number(log_record.severity_number),
       "severity_text" => log_record.severity_text,
+      "flags" => log_record.flags,
+      "trace_flags" => Bitwise.band(log_record.flags, 0xFF),
       "trace_id" => Base.encode16(log_record.trace_id, case: :lower),
       "span_id" => Base.encode16(log_record.span_id, case: :lower),
       "observed_time_unix_nano" => log_record.observed_time_unix_nano
@@ -65,6 +68,10 @@ defmodule Logflare.Logs.OtelLog do
 
     if timestamp == 0, do: event, else: Map.put(event, "timestamp", timestamp)
   end
+
+  @spec severity_number(SeverityNumber.t()) :: integer()
+  defp severity_number(severity) when is_integer(severity), do: severity
+  defp severity_number(severity), do: SeverityNumber.value(severity)
 
   defp event_message(%{body: %{value: {:string_value, body}}}) do
     body

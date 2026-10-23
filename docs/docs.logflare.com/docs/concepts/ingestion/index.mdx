@@ -145,6 +145,8 @@ OTLP byte values are represented as Base64 strings, including bytes nested in ar
 
 OTLP log timestamps use the occurrence time when present, otherwise the observation time. When both are omitted, Logflare infers the receive time. The observation time is also retained in `observed_time_unix_nano`.
 
+OTLP logs retain `event_name`, `dropped_attributes_count`, and the raw `flags` bitmask. `trace_flags` contains the low eight flag bits. Numeric severity values, including unknown future enum values, are retained in the converted event.
+
 ## Pipeline Transformations
 
 At ingestion, the pipeline will perform the following in sequence:
