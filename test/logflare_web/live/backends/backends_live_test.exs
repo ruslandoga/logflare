@@ -14,6 +14,8 @@ defmodule LogflareWeb.BackendsLiveTest do
     :ok
   end
 
+  setup :use_backend_batch_timeout
+
   defp log_in_user_with_source(%{conn: conn}) do
     user = insert(:user)
     team = insert(:team, user: user)
@@ -784,6 +786,7 @@ defmodule LogflareWeb.BackendsLiveTest do
       assert html =~ "Both query user and query password must be provided"
     end
 
+    @tag :backend_batch_timeout
     test "can create a clickhouse backend with custom batch limits", %{conn: conn, user: user} do
       {:ok, view, _html} = live_with_redirect(conn, ~p"/backends/new")
 
@@ -1206,6 +1209,7 @@ defmodule LogflareWeb.BackendsLiveTest do
              |> has_element?()
     end
 
+    @tag :backend_batch_timeout
     test "editing only the batch limits swaps the running pipeline without a restart", %{
       conn: conn,
       user: user
@@ -2254,6 +2258,22 @@ defmodule LogflareWeb.BackendsLiveTest do
            |> get(~p"/backends")
            |> redirected_to(302) == ~p"/auth/login"
   end
+
+  @spec use_backend_batch_timeout(map()) :: :ok
+  defp use_backend_batch_timeout(%{backend_batch_timeout: true}) do
+    pipeline_config = Application.fetch_env!(:logflare, ClickHousePipeline)
+    on_exit(fn -> Application.put_env(:logflare, ClickHousePipeline, pipeline_config) end)
+
+    Application.put_env(
+      :logflare,
+      ClickHousePipeline,
+      Keyword.delete(pipeline_config, :batch_timeout)
+    )
+
+    :ok
+  end
+
+  defp use_backend_batch_timeout(_context), do: :ok
 
   defp create_running_clickhouse_backend(user) do
     {:ok, backend} =

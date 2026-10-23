@@ -104,11 +104,21 @@ defmodule Logflare.Backends.Adaptor.ClickHouseAdaptor.Pipeline do
   @spec start_link(list()) ::
           {:ok, pid()} | :ignore | {:error, {:already_started, pid()} | term()}
   def start_link(args) do
+    pipeline_defaults = Application.get_env(:logflare, __MODULE__, [])
     {name, args} = Keyword.pop(args, :name)
     backend = Keyword.fetch!(args, :backend)
     processor_concurrency = processor_concurrency()
     batch_size = config_value(backend, :batch_size, @batch_size)
-    batch_timeout = config_value(backend, :batch_timeout, @batch_timeout)
+
+    batch_timeout =
+      Keyword.get(
+        pipeline_defaults,
+        :batch_timeout,
+        config_value(backend, :batch_timeout, @batch_timeout)
+      )
+
+    batch_timeout = Keyword.get(args, :batch_timeout, batch_timeout)
+    args = Keyword.merge(pipeline_defaults, args)
 
     Broadway.start_link(__MODULE__,
       name: name,
@@ -119,6 +129,7 @@ defmodule Logflare.Backends.Adaptor.ClickHouseAdaptor.Pipeline do
           {BufferProducer,
            [
              backend_id: backend.id,
+             interval: Keyword.get(args, :producer_interval, 1_000),
              consolidated: true,
              id_passing: true,
              max_in_flight: @max_in_flight,
