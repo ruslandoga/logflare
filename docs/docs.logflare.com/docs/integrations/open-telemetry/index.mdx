@@ -39,6 +39,8 @@ An empty HTTP/protobuf body represents an empty batch. It follows the same authe
 
 HTTP ingestion applies the configured parser body limit to both protobuf and JSON requests, including decompressed request bodies. The default OTLP pipeline limit is 12 MB.
 
+OTLP JSON uses hexadecimal `traceId` values (32 characters) and `spanId` / `parentSpanId` values (16 characters), including identifiers in span links and metric exemplars. Hexadecimal characters may use either case. Empty optional identifiers are accepted; malformed non-empty identifiers are rejected. `AnyValue.bytesValue` continues to use Base64 encoding.
+
 ### Configuration Examples
 
 <Tabs>
