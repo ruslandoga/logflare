@@ -28,6 +28,11 @@ defmodule LogflareGrpc.Trace.Server do
           status: :unavailable,
           message: "Source is unavailable. Send the batch again."
 
+      {:error, :spool_unavailable} ->
+        raise GRPC.RPCError,
+          status: :unavailable,
+          message: "Ingest spool is unavailable. Send the batch again."
+
       {:error, errors} when is_list(errors) ->
         Logger.warning("OTLP gRPC ingest rejected #{length(errors)} event(s) at validation",
           source_token: source.token,
@@ -35,8 +40,14 @@ defmodule LogflareGrpc.Trace.Server do
           sample_errors: errors |> Enum.uniq() |> Enum.take(3)
         )
 
-      _ ->
+      {:ok, _count} ->
         :ok
+
+      :ok ->
+        :ok
+
+      _unexpected ->
+        raise GRPC.RPCError, status: :internal, message: "Internal server error."
     end
 
     GRPC.Server.set_trailers(stream, %{"grpc-status" => "0"})

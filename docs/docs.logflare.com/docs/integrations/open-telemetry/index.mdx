@@ -45,6 +45,12 @@ HTTP ingestion responses use the request encoding: `application/json` requests r
 
 When the ingestion spool is temporarily unavailable, HTTP OTLP endpoints return `503 Service Unavailable` with `Retry-After: 5`. Exporters should retry the batch after that delay.
 
+### gRPC ingestion failures
+
+When the source cannot start or the ingest spool is unavailable, OTLP/gRPC returns
+`UNAVAILABLE`. Exporters should retry the batch with backoff. An unexpected ingest
+failure returns `INTERNAL` instead of a successful acknowledgement.
+
 ### Configuration Examples
 
 <Tabs>
