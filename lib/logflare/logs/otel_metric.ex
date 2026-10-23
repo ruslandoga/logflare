@@ -8,7 +8,8 @@ defmodule Logflare.Logs.OtelMetric do
   * A Log Event is created for each DataPoint, including parent metric data
 
   Supports gauges, sums, histograms and exponential histograms. Summaries aren't
-  supported.
+  supported. Data points marked `NO_RECORDED_VALUE` are omitted because they
+  represent missing observations rather than numeric samples.
   """
 
   require Logger
@@ -58,7 +59,7 @@ defmodule Logflare.Logs.OtelMetric do
     resource = base["resource"]
     project = base["project"]
 
-    for %{value: {_, value}} = data_point <- data_points do
+    for %{value: {_, value}} = data_point <- data_points, recorded_value?(data_point) do
       %{
         "event_message" => event_message,
         "unit" => unit,
@@ -67,6 +68,7 @@ defmodule Logflare.Logs.OtelMetric do
         "resource" => resource,
         "project" => project,
         "metric_type" => "gauge",
+        "flags" => data_point.flags,
         "value" => value,
         "start_time" => data_point.start_time_unix_nano,
         "attributes" => Otel.handle_attributes(data_point.attributes),
@@ -85,7 +87,7 @@ defmodule Logflare.Logs.OtelMetric do
     temporality = aggregation_temporality(sum.aggregation_temporality)
     is_monotonic = sum.is_monotonic
 
-    for %{value: {_, value}} = data_point <- sum.data_points do
+    for %{value: {_, value}} = data_point <- sum.data_points, recorded_value?(data_point) do
       %{
         "event_message" => event_message,
         "unit" => unit,
@@ -94,6 +96,7 @@ defmodule Logflare.Logs.OtelMetric do
         "resource" => resource,
         "project" => project,
         "metric_type" => "sum",
+        "flags" => data_point.flags,
         "aggregation_temporality" => temporality,
         "is_monotonic" => is_monotonic,
         "value" => value,
@@ -113,7 +116,7 @@ defmodule Logflare.Logs.OtelMetric do
     project = base["project"]
     temporality = aggregation_temporality(histogram.aggregation_temporality)
 
-    for data_point <- histogram.data_points do
+    for data_point <- histogram.data_points, recorded_value?(data_point) do
       %{
         "event_message" => event_message,
         "unit" => unit,
@@ -122,6 +125,7 @@ defmodule Logflare.Logs.OtelMetric do
         "resource" => resource,
         "project" => project,
         "metric_type" => "histogram",
+        "flags" => data_point.flags,
         "aggregation_temporality" => temporality,
         "count" => data_point.count,
         "sum" => data_point.sum,
@@ -145,7 +149,7 @@ defmodule Logflare.Logs.OtelMetric do
     project = base["project"]
     temporality = aggregation_temporality(histogram.aggregation_temporality)
 
-    for data_point <- histogram.data_points do
+    for data_point <- histogram.data_points, recorded_value?(data_point) do
       %{
         "event_message" => event_message,
         "unit" => unit,
@@ -154,6 +158,7 @@ defmodule Logflare.Logs.OtelMetric do
         "resource" => resource,
         "project" => project,
         "metric_type" => "exponential_histogram",
+        "flags" => data_point.flags,
         "aggregation_temporality" => temporality,
         "count" => data_point.count,
         "sum" => data_point.sum,
@@ -178,6 +183,9 @@ defmodule Logflare.Logs.OtelMetric do
 
     []
   end
+
+  @spec recorded_value?(%{flags: non_neg_integer()}) :: boolean()
+  defp recorded_value?(%{flags: flags}), do: Bitwise.band(flags, 1) == 0
 
   @spec exponential_histogram_buckets(map() | nil) :: map()
   defp exponential_histogram_buckets(nil), do: %{"offset" => 0, "bucket_counts" => []}

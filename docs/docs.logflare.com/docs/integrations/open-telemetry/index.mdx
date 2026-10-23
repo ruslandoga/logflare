@@ -95,3 +95,5 @@ docker compose -f docker-compose.yml -f docker-compose.pg.yml -f docker-compose.
 - Exponential histograms may omit positive or negative buckets. Omitted buckets are stored with offset `0` and an empty bucket-count array.
 
 - Metrics without a data payload and gauge or sum points without a value are omitted. Valid points in the same batch, including zero values, are still ingested.
+
+- Metric points marked `NO_RECORDED_VALUE` are omitted as missing observations. Other points retain their original `flags` bitmask.
