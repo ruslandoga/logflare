@@ -20,12 +20,17 @@ defmodule Logflare.Sources.SourceRouter do
 
   The rule set must exclude disabled backend destinations and retain sink sources.
   """
-  @callback matching_rules(LE.t(), Source.t(), term()) :: [Rule.t()]
+  @callback matching_rules(LE.t(), Source.t(), enabled_rules :: term()) :: [Rule.t()]
 
   @spec route_to_sinks_and_ingest(LE.t() | [LE.t()], Source.t(), module()) :: LE.t() | [LE.t()]
   def route_to_sinks_and_ingest(events, source, router \\ @default_router)
 
   def route_to_sinks_and_ingest([], _source, _router), do: []
+
+  def route_to_sinks_and_ingest([%LE{via_rule_id: id} = le | events], source, router)
+      when id != nil do
+    [le | route_to_sinks_and_ingest(events, source, router)]
+  end
 
   def route_to_sinks_and_ingest(events, source, router) when is_list(events) do
     rules = router.list_enabled_rules(source)
@@ -46,22 +51,6 @@ defmodule Logflare.Sources.SourceRouter do
   def route_to_sinks_and_ingest(%LE{via_rule_id: nil} = le, source, router) do
     route_to_sinks_and_ingest([le], source, router)
     le
-  end
-
-  @spec filter_enabled_rules([Rule.t()]) :: [Rule.t()]
-  def filter_enabled_rules(rules) do
-    enabled_backends =
-      rules
-      |> Enum.uniq_by(& &1.backend_id)
-      |> Map.new(fn
-        %Rule{backend_id: nil} ->
-          {nil, true}
-
-        %Rule{backend_id: id} ->
-          {id, not match?(%{enabled: false}, Backends.Cache.get_backend(id))}
-      end)
-
-    Enum.filter(rules, &Map.fetch!(enabled_backends, &1.backend_id))
   end
 
   @spec maybe_emit_dropped(term(), Rule.t(), Source.t()) :: :ok

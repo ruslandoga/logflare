@@ -3,19 +3,30 @@ defmodule Logflare.Sources.SourceRouter.Sequential do
 
   @behaviour Logflare.Sources.SourceRouter
 
+  alias Logflare.Backends
   alias Logflare.LogEvent, as: LE
   alias Logflare.Lql.Rules.FilterRule
   alias Logflare.Rules
   alias Logflare.Rules.Rule
   alias Logflare.Sources.Source
-  alias Logflare.Sources.SourceRouter
 
   @impl true
   @spec list_enabled_rules(Source.t()) :: [Rule.t()]
   def list_enabled_rules(source) do
-    source
-    |> Rules.Cache.list_rules()
-    |> SourceRouter.filter_enabled_rules()
+    rules = Rules.Cache.list_rules(source)
+
+    enabled_backends =
+      rules
+      |> Enum.uniq_by(& &1.backend_id)
+      |> Map.new(fn
+        %Rule{backend_id: nil} ->
+          {nil, true}
+
+        %Rule{backend_id: id} ->
+          {id, not match?(%{enabled: false}, Backends.Cache.get_backend(id))}
+      end)
+
+    Enum.filter(rules, &Map.fetch!(enabled_backends, &1.backend_id))
   end
 
   @impl true

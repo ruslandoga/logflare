@@ -23,16 +23,31 @@ defmodule Logflare.Sources.SourceRouterTest do
   test "prepares enabled rules once per batch", %{user: user} do
     source = insert(:source, user: user)
     events = build_list(2, :log_event, source: source, message: "testing123")
+    routed = %{hd(events) | via_rule_id: 1}
+    events = [routed | events] ++ [routed]
 
     expect(SourceRouter.RulesTree, :list_enabled_rules, fn received_source ->
       assert received_source.id == source.id
-      {[], MapSet.new()}
+      []
     end)
 
     assert SourceRouter.route_to_sinks_and_ingest(events, source) == events
   end
 
-  test "checks each backend once while preserving rule order", %{backend: backend, user: user} do
+  test "does not prepare rules for already-routed events", %{user: user} do
+    source = insert(:source, user: user)
+    event = %{build(:log_event, source: source) | via_rule_id: 1}
+    events = [event, event]
+    reject(SourceRouter.RulesTree, :list_enabled_rules, 1)
+
+    assert SourceRouter.route_to_sinks_and_ingest(events, source) == events
+  end
+
+  test "Sequential checks each backend once while preserving rule order", %{
+    backend: backend,
+    user: user
+  } do
+    source = insert(:source, user: user)
     disabled = insert(:backend, user: user, enabled: false)
     backends = %{backend.id => backend, disabled.id => disabled}
 
@@ -45,8 +60,10 @@ defmodule Logflare.Sources.SourceRouterTest do
     ]
 
     expect(Backends.Cache, :get_backend, 2, &Map.fetch!(backends, &1))
+    Cachex.put!(Rules.Cache, {:list_by_source_id, [source.id]}, {:cached, rules})
 
-    assert [%Rule{id: 1}, %Rule{id: 2}, %Rule{id: 4}] = SourceRouter.filter_enabled_rules(rules)
+    assert [%Rule{id: 1}, %Rule{id: 2}, %Rule{id: 4}] =
+             SourceRouter.Sequential.list_enabled_rules(source)
   end
 
   for router <- @routers do

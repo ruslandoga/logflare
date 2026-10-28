@@ -1,6 +1,7 @@
 defmodule Logflare.Sources.SourceRouter.RulesTreeTest do
   use Logflare.DataCase
 
+  alias Logflare.Backends
   alias Logflare.LogEvent
   alias Logflare.Lql.Rules.FilterRule
   alias Logflare.Rules
@@ -46,8 +47,8 @@ defmodule Logflare.Sources.SourceRouter.RulesTreeTest do
                [
                  {"metadata",
                   [
-                    {"field1", [{:eq_index, %{0 => 0}}]},
-                    {"field2", [{:eq_index, %{"sth" => 1}}]}
+                    {"field1", [{:eq_index, %{0 => {nil, 0, 0}}}]},
+                    {"field2", [{:eq_index, %{"sth" => {nil, 1, 0}}}]}
                   ]}
                ]
     end
@@ -71,8 +72,8 @@ defmodule Logflare.Sources.SourceRouter.RulesTreeTest do
                 ]}
              ] = @subject.build(rules)
 
-      assert 0 in targets
-      assert 1 in targets
+      assert {nil, 0, 0} in targets
+      assert {nil, 1, 0} in targets
     end
 
     test "rules with similar filters" do
@@ -92,7 +93,7 @@ defmodule Logflare.Sources.SourceRouter.RulesTreeTest do
                 [
                   {"field1",
                    [
-                     {:eq_index, %{0 => 0, 1 => 1}}
+                     {:eq_index, %{0 => {nil, 0, 0}, 1 => {nil, 1, 0}}}
                    ]}
                 ]}
              ] = @subject.build(rules)
@@ -114,8 +115,8 @@ defmodule Logflare.Sources.SourceRouter.RulesTreeTest do
       # filter 1 (level):   bitmask = bxor(0b11, 0b10) = 0b01
       assert @subject.build(rules) ==
                [
-                 {"level", [{:eq_index, %{"error" => {0, 0b01}}}]},
-                 {"project", [{:eq_index, %{"foo" => {0, 0b10}}}]}
+                 {"level", [{:eq_index, %{"error" => {nil, 0, 0b01}}}]},
+                 {"project", [{:eq_index, %{"foo" => {nil, 0, 0b10}}}]}
                ]
     end
 
@@ -134,10 +135,8 @@ defmodule Logflare.Sources.SourceRouter.RulesTreeTest do
         }
       ]
 
-      # Negated equality is NOT folded into eq_index — stays as a regular
-      # operator leaf. Single-filter target is still a bare integer.
       assert @subject.build(rules) ==
-               [{"level", [{{:not, {:=, "drop_me"}}, {:route, 0}}]}]
+               [{"level", [{{:not, {:=, "drop_me"}}, {:route, {nil, 0, 0}}}]}]
     end
   end
 
@@ -174,8 +173,6 @@ defmodule Logflare.Sources.SourceRouter.RulesTreeTest do
         rule(2, [filter("level", :"~", "err.*")]),
         rule(3, [range_filter("level", 1, 5)]),
         rule(4, [filter("level", :=, "drop_me", %{negate: true})]),
-        # duplicate range — exercises route-list consolidation through a non-eq
-        # leaf (bare-int targets walked via accumulate's list head clause)
         rule(5, [range_filter("level", 1, 5)])
       ]
 
@@ -189,10 +186,7 @@ defmodule Logflare.Sources.SourceRouter.RulesTreeTest do
     test "multi-filter rule alongside single-filter rules at same path" do
       rules = [
         rule(0, [filter("project", :=, "foo")]),
-        # same value as rule 0 — homogeneous eq_index entry mixing bare-int + tuple
         rule(1, [filter("project", :=, "foo"), filter("level", :=, "error")]),
-        # different value at same path — exercises heterogeneous eq_index map
-        # where one key resolves to a bare int and another to a tuple
         rule(2, [filter("project", :=, "bar"), filter("level", :=, "error")]),
         # 3 filters — exercises bitmask accumulation through more than 2 paths
         rule(3, [
@@ -233,8 +227,6 @@ defmodule Logflare.Sources.SourceRouter.RulesTreeTest do
       assert matching(rules, %{"metadata" => [%{"tag" => "y"}, %{"tag" => "x"}]}) == [0]
       assert matching(rules, %{"metadata" => [%{"tag" => "y"}, %{"tag" => "z"}]}) == []
 
-      # bare-int accumulate must be idempotent — a single-filter rule that matches
-      # twice via list traversal still appears exactly once in the result
       assert matching(rules, %{"metadata" => [%{"tag" => "x"}, %{"tag" => "x"}]}) == [0]
     end
   end
@@ -393,7 +385,7 @@ defmodule Logflare.Sources.SourceRouter.RulesTreeTest do
     end
   end
 
-  describe "matching_rules/3" do
+  describe "enabled rule matching" do
     setup do
       insert(:plan)
       user = insert(:user)
@@ -401,11 +393,17 @@ defmodule Logflare.Sources.SourceRouter.RulesTreeTest do
       rule = build(:rule, backend: backend, lql_string: "testing")
       source = insert(:source, user: user, rules: [rule])
 
-      [source: source, log_event: build(:log_event, source: source, message: "testing123")]
+      [
+        backend: backend,
+        source: source,
+        log_event: build(:log_event, source: source, message: "testing123")
+      ]
     end
 
     test "returns the rules matching the event", %{source: source, log_event: le} do
-      assert [%Rule{}] = @subject.matching_rules(le, source, @subject.list_enabled_rules(source))
+      tree = @subject.list_enabled_rules(source)
+      assert tree == Rules.Cache.rules_tree_by_source_id(source.id)
+      assert [%Rule{}] = @subject.matching_rules(le, source, tree)
     end
 
     test "drops matched ids whose rule no longer exists", %{source: source, log_event: le} do
@@ -413,6 +411,73 @@ defmodule Logflare.Sources.SourceRouter.RulesTreeTest do
 
       assert @subject.matching_rules(le, source, @subject.list_enabled_rules(source)) == []
     end
+
+    test "prunes the cached tree while preserving operators and filter masks", %{
+      source: source,
+      backend: backend
+    } do
+      disabled = insert(:backend, user_id: source.user_id, enabled: false)
+      shared = filter("metadata.value", :=, "keep")
+      range = range_filter("metadata.count", 5, 10)
+
+      enabled_rules = [
+        %{rule(0, [shared]) | backend_id: backend.id},
+        %{rule(2, [shared, shared]) | backend_id: backend.id},
+        %{rule(3, [filter("metadata.message", :"~", "^keep")]) | backend_id: backend.id},
+        rule(4, [range]),
+        %{rule(5, [filter("metadata.value", :=, "no", %{negate: true})]) | backend_id: backend.id}
+      ]
+
+      disabled_rules = [
+        %{rule(1, [shared]) | backend_id: disabled.id},
+        %{
+          rule(6, [filter("metadata.disabled.deep", :string_contains, "drop")])
+          | backend_id: disabled.id
+        },
+        %{rule(7, [range]) | backend_id: disabled.id},
+        %{rule(8, [filter("metadata.value", :=, "gone")]) | backend_id: disabled.id}
+      ]
+
+      cached_tree = cache_rules(source, enabled_rules ++ disabled_rules)
+      backends = %{backend.id => backend, disabled.id => disabled}
+      stub(Backends.Cache, :get_backend, &Map.fetch!(backends, &1))
+      reject(Rules, :list_by_source_id, 1)
+      tree = @subject.list_enabled_rules(source)
+
+      assert tree == @subject.build(enabled_rules)
+      assert Rules.Cache.rules_tree_by_source_id(source.id) == cached_tree
+
+      event = %LogEvent{
+        body: %{
+          "metadata" => %{
+            "value" => "keep",
+            "count" => 7,
+            "message" => "keep this",
+            "disabled" => %{"deep" => "drop"}
+          }
+        }
+      }
+
+      assert Enum.sort(@subject.matching_rule_ids(event, tree)) == [0, 2, 3, 4, 5]
+    end
+
+    test "removes empty ancestors when every destination is disabled", %{source: source} do
+      disabled = insert(:backend, user_id: source.user_id, enabled: false)
+      rules = [%{rule(1, [filter("metadata.only.deep", :=, "drop")]) | backend_id: disabled.id}]
+      cached_tree = cache_rules(source, rules)
+      reject(Rules, :list_by_source_id, 1)
+
+      assert @subject.list_enabled_rules(source) == []
+      assert Rules.Cache.rules_tree_by_source_id(source.id) == cached_tree
+    end
+  end
+
+  @spec cache_rules(Logflare.Sources.Source.t(), [Rule.t()]) :: RulesTree.t()
+  defp cache_rules(source, rules) do
+    tree = @subject.build(rules)
+    Cachex.del!(Rules.Cache, {:list_by_source_id, [source.id]})
+    Cachex.put!(Rules.Cache, {:rules_tree_by_source_id, [source.id]}, {:cached, tree})
+    tree
   end
 
   defp filter(path, operator, value, modifiers \\ %{}) do

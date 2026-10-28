@@ -5,12 +5,12 @@ defmodule Logflare.Sources.SourceRouter.RulesTree do
 
   import Logflare.Utils, only: [stringify: 1]
 
+  alias Logflare.Backends
   alias Logflare.LogEvent
   alias Logflare.Lql.Rules.FilterRule
   alias Logflare.Rules
   alias Logflare.Rules.Rule
   alias Logflare.Sources.Source
-  alias Logflare.Sources.SourceRouter
 
   @type t() :: [entry()]
   @type entry() ::
@@ -18,31 +18,25 @@ defmodule Logflare.Sources.SourceRouter.RulesTree do
           | {operator(), route()}
           | {:eq_index, eq_index()}
   @type route() :: {:route, target() | [target()]}
-  @type target() :: Rule.id() | {Rule.id(), filter_set()}
+  @type target() :: {non_neg_integer() | nil, Rule.id(), filter_set()}
   @type key() :: binary()
   @type operator() :: {atom(), any()}
   @type eq_index() :: %{term() => target() | [target()]}
 
   @type filter_set() :: non_neg_integer()
-  @type enabled_rules() :: {t(), MapSet.t(Rule.id())}
 
   @impl true
-  @spec list_enabled_rules(Source.t()) :: enabled_rules()
+  @spec list_enabled_rules(Source.t()) :: t()
   def list_enabled_rules(source) do
-    enabled_ids =
-      source
-      |> Rules.Cache.list_rules()
-      |> SourceRouter.filter_enabled_rules()
-      |> MapSet.new(& &1.id)
-
-    {Rules.Cache.rules_tree_by_source_id(source.id), enabled_ids}
+    source.id
+    |> Rules.Cache.rules_tree_by_source_id()
+    |> filter_tree()
   end
 
   @impl true
-  @spec matching_rules(LogEvent.t(), Source.t(), enabled_rules()) :: [Rule.t()]
-  def matching_rules(event, _source, {rule_set, enabled_ids}) do
+  @spec matching_rules(LogEvent.t(), Source.t(), t()) :: [Rule.t()]
+  def matching_rules(event, _source, rule_set) do
     matching_rule_ids(event, rule_set)
-    |> Enum.filter(&MapSet.member?(enabled_ids, &1))
     |> Rules.Cache.get_rules()
     |> Enum.reject(&is_nil/1)
   end
@@ -65,6 +59,43 @@ defmodule Logflare.Sources.SourceRouter.RulesTree do
       {id, matches_left} when matches_left <= 0 -> [id]
       {_id, _matches_left} -> []
     end)
+  end
+
+  @spec filter_tree(t()) :: t()
+  defp filter_tree(tree) do
+    Enum.flat_map(tree, fn
+      {:eq_index, index} ->
+        index =
+          for {value, targets} <- index,
+              targets = filter_targets(targets),
+              targets != [],
+              into: %{},
+              do: {value, targets}
+
+        if map_size(index) == 0, do: [], else: [{:eq_index, index}]
+
+      {key, children} when is_list(children) ->
+        children = filter_tree(children)
+        if children == [], do: [], else: [{key, children}]
+
+      {operator, {:route, targets}} ->
+        targets = filter_targets(targets)
+        if targets == [], do: [], else: [{operator, {:route, targets}}]
+    end)
+  end
+
+  @spec filter_targets(target() | [target()]) :: target() | [target()]
+  defp filter_targets(targets) do
+    targets
+    |> List.wrap()
+    |> Enum.reject(fn
+      {nil, _rule_id, _mask} -> false
+      {id, _rule_id, _mask} -> match?(%{enabled: false}, Backends.Cache.get_backend(id))
+    end)
+    |> case do
+      [target] -> target
+      targets -> targets
+    end
   end
 
   # Find matches: find key in log event
@@ -162,16 +193,15 @@ defmodule Logflare.Sources.SourceRouter.RulesTree do
   defp accumulate([], acc), do: acc
   defp accumulate([h | tail], acc), do: accumulate(tail, accumulate(h, acc))
 
-  # Accumulate: single-filter rule without bitmask, use bare Rule.id()
-  defp accumulate(rule_id, acc) when is_integer(rule_id),
+  defp accumulate({_backend_id, rule_id, 0}, acc),
     do: Map.put(acc, rule_id, 0)
 
   # Accumulate: handle rule id already present in accumulator
-  defp accumulate({rule_id, bitmask}, acc) when is_map_key(acc, rule_id),
+  defp accumulate({_backend_id, rule_id, bitmask}, acc) when is_map_key(acc, rule_id),
     do: %{acc | rule_id => apply_filter_bitmask(acc[rule_id], bitmask)}
 
   # Accumulate: handle rule id not present in accumulator
-  defp accumulate({rule_id, bitmask}, acc),
+  defp accumulate({_backend_id, rule_id, bitmask}, acc),
     do: Map.put(acc, rule_id, bitmask)
 
   @doc """
@@ -203,7 +233,7 @@ defmodule Logflare.Sources.SourceRouter.RulesTree do
         |- {:~, "sth}
            |- {route, rule(1)}
   ```
-  where `rule(id)` is a tuple of rule ID and integer filter bitflag
+  where `rule(id)` is a tuple of backend ID, rule ID and integer filter bitflag
   (see `build_filter_flagset/1` for details).
 
   The representation in Elixir terms is:
@@ -212,14 +242,14 @@ defmodule Logflare.Sources.SourceRouter.RulesTree do
   [
     {"metadata",
       [
-        {"field1", [{:eq_index, %{8 => 0}}]},
-        {"field2", [{{:~, "sth"}, {:route, 1}}]}
+        {"field1", [{:eq_index, %{8 => {nil, 0, 0}}}]},
+        {"field2", [{{:~, "sth"}, {:route, {nil, 1, 0}}}]}
       ]}
   ]
   ```
-  Single-filter rule targets are stored as bare `Rule.id()` integers (instead of
-  `{Rule.id(), filter_set()}` tuples).
-  Multi-filter rules keep the tuple form so the bitmask accumulates across paths.
+  Targets contain `{backend_id, rule_id, filter_mask}`. Sink-source targets have
+  a nil backend ID. Single-filter rules have a zero mask; multi-filter masks
+  accumulate across paths.
 
   You can find more examples by looking at `rules_tree_test.exs`
   """
@@ -228,7 +258,7 @@ defmodule Logflare.Sources.SourceRouter.RulesTree do
     for rule <- rules,
         filters_num = length(rule.lql_filters),
         {filter, index} <- Enum.with_index(rule.lql_filters) do
-      target = build_target(rule.id, filters_num, index)
+      target = build_target(rule, filters_num, index)
 
       reverse_path = String.split(filter.path, ".") |> Enum.reverse()
 
@@ -241,12 +271,9 @@ defmodule Logflare.Sources.SourceRouter.RulesTree do
     |> deep_group_keys()
   end
 
-  # Single-filter rule: emit bare rule_id. The accumulate clause for integers
-  # puts straight to 0 (matched), bypassing apply_filter_bitmask entirely.
-  defp build_target(rule_id, 1, 0), do: rule_id
-
-  defp build_target(rule_id, filters_num, index),
-    do: {rule_id, build_filter_bitmask(filters_num, index)}
+  @spec build_target(Rule.t(), pos_integer(), non_neg_integer()) :: target()
+  defp build_target(rule, filters_num, index),
+    do: {rule.backend_id, rule.id, build_filter_bitmask(filters_num, index)}
 
   defp to_operator(%FilterRule{modifiers: %{negate: true}} = rule) do
     {:not, to_operator(%{rule | modifiers: %{rule.modifiers | negate: false}})}
