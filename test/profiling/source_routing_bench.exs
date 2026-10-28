@@ -123,10 +123,20 @@ end
 Benchee.run(
   %{
     "Reference" => fn {event, source} ->
-      SourceRouter.Sequential.matching_rules(event, source) |> MapSet.new()
+      SourceRouter.Sequential.matching_rules(
+        event,
+        source,
+        SourceRouter.Sequential.list_enabled_rules(source)
+      )
+      |> MapSet.new()
     end,
     "RulesTree" => fn {event, source} ->
-      SourceRouter.RulesTree.matching_rules(event, source) |> MapSet.new()
+      SourceRouter.RulesTree.matching_rules(
+        event,
+        source,
+        SourceRouter.RulesTree.list_enabled_rules(source)
+      )
+      |> MapSet.new()
     end
   },
   before_scenario: fn {event, source} ->

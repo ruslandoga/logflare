@@ -1,22 +1,27 @@
 defmodule Logflare.Sources.SourceRouter.Sequential do
   @moduledoc false
 
-  alias Logflare.Backends
+  @behaviour Logflare.Sources.SourceRouter
+
   alias Logflare.LogEvent, as: LE
   alias Logflare.Lql.Rules.FilterRule
   alias Logflare.Rules
   alias Logflare.Rules.Rule
-
-  @behaviour Logflare.Sources.SourceRouter
+  alias Logflare.Sources.Source
+  alias Logflare.Sources.SourceRouter
 
   @impl true
-  def matching_rules(le, source) do
-    rules = Rules.Cache.list_rules(source)
+  @spec list_enabled_rules(Source.t()) :: [Rule.t()]
+  def list_enabled_rules(source) do
+    source
+    |> Rules.Cache.list_rules()
+    |> SourceRouter.filter_enabled_rules()
+  end
 
-    for %Rule{lql_filters: [_ | _]} = rule <- rules,
-        rule.backend_id == nil or
-          not match?(%{enabled: false}, Backends.Cache.get_backend(rule.backend_id)),
-        route_with_lql_rules?(le, rule) do
+  @impl true
+  @spec matching_rules(LE.t(), Source.t(), [Rule.t()]) :: [Rule.t()]
+  def matching_rules(le, _source, rules) do
+    for %Rule{lql_filters: [_ | _]} = rule <- rules, route_with_lql_rules?(le, rule) do
       rule
     end
   end

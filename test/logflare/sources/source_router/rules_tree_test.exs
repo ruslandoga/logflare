@@ -393,7 +393,7 @@ defmodule Logflare.Sources.SourceRouter.RulesTreeTest do
     end
   end
 
-  describe "matching_rules/2" do
+  describe "matching_rules/3" do
     setup do
       insert(:plan)
       user = insert(:user)
@@ -405,13 +405,13 @@ defmodule Logflare.Sources.SourceRouter.RulesTreeTest do
     end
 
     test "returns the rules matching the event", %{source: source, log_event: le} do
-      assert [%Rule{}] = @subject.matching_rules(le, source)
+      assert [%Rule{}] = @subject.matching_rules(le, source, @subject.list_enabled_rules(source))
     end
 
     test "drops matched ids whose rule no longer exists", %{source: source, log_event: le} do
       stub(Rules, :get_rule, fn _id -> nil end)
 
-      assert @subject.matching_rules(le, source) == []
+      assert @subject.matching_rules(le, source, @subject.list_enabled_rules(source)) == []
     end
   end
 

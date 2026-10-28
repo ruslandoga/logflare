@@ -1,6 +1,7 @@
 defmodule Logflare.Sources.SourceRouterTest do
   use Logflare.DataCase
 
+  alias Logflare.Backends
   alias Logflare.Backends.SourceSup
   alias Logflare.LogEvent
   alias Logflare.Lql.Parser
@@ -17,6 +18,35 @@ defmodule Logflare.Sources.SourceRouterTest do
     insert(:plan)
     user = insert(:user)
     [user: user, backend: insert(:backend, user: user)]
+  end
+
+  test "prepares enabled rules once per batch", %{user: user} do
+    source = insert(:source, user: user)
+    events = build_list(2, :log_event, source: source, message: "testing123")
+
+    expect(SourceRouter.RulesTree, :list_enabled_rules, fn received_source ->
+      assert received_source.id == source.id
+      {[], MapSet.new()}
+    end)
+
+    assert SourceRouter.route_to_sinks_and_ingest(events, source) == events
+  end
+
+  test "checks each backend once while preserving rule order", %{backend: backend, user: user} do
+    disabled = insert(:backend, user: user, enabled: false)
+    backends = %{backend.id => backend, disabled.id => disabled}
+
+    rules = [
+      %Rule{id: 1, backend_id: backend.id},
+      %Rule{id: 2, backend_id: nil},
+      %Rule{id: 3, backend_id: disabled.id},
+      %Rule{id: 4, backend_id: backend.id},
+      %Rule{id: 5, backend_id: disabled.id}
+    ]
+
+    expect(Backends.Cache, :get_backend, 2, &Map.fetch!(backends, &1))
+
+    assert [%Rule{id: 1}, %Rule{id: 2}, %Rule{id: 4}] = SourceRouter.filter_enabled_rules(rules)
   end
 
   for router <- @routers do
@@ -75,7 +105,15 @@ defmodule Logflare.Sources.SourceRouterTest do
 
         [enabled_rule, disabled_rule, sink_rule] = source.rules
         le = build(:log_event, source: source, message: "testing123")
-        matched_ids = Enum.map(unquote(router).matching_rules(le, source), & &1.id)
+        Cachex.del!(Rules.Cache, {:get_rule, [disabled_rule.id]})
+
+        stub(Rules, :get_rule, fn id ->
+          if id == disabled_rule.id, do: assert(Backends.Cache.get_backend(disabled.id).enabled)
+          call_original(Rules, :get_rule, [id])
+        end)
+
+        matched_ids = Enum.map(matching_rules(unquote(router), le, source), & &1.id)
+
         assert Enum.sort(matched_ids) == Enum.sort([enabled_rule.id, sink_rule.id])
 
         cached_tree = Rules.Cache.rules_tree_by_source_id(source.id)
@@ -84,7 +122,8 @@ defmodule Logflare.Sources.SourceRouterTest do
         disabled |> Ecto.Changeset.change(enabled: true) |> Repo.update!()
         Logflare.ContextCache.bust_keys([{Logflare.Backends, disabled.id}])
 
-        matched_ids = Enum.map(unquote(router).matching_rules(le, source), & &1.id)
+        matched_ids = Enum.map(matching_rules(unquote(router), le, source), & &1.id)
+
         assert Enum.sort(matched_ids) == Enum.sort(Enum.map(source.rules, & &1.id))
         assert Rules.Cache.rules_tree_by_source_id(source.id) == cached_tree
       end
@@ -115,13 +154,16 @@ defmodule Logflare.Sources.SourceRouterTest do
         end
 
         {le, source} = build_data.([1, 2, 5, 0, -100, 1_000_000], 2)
-        assert unquote(router).matching_rules(le, source) == source.rules
+
+        assert matching_rules(unquote(router), le, source) == source.rules
 
         {le, source} = build_data.([], 2)
-        assert unquote(router).matching_rules(le, source) == []
+
+        assert matching_rules(unquote(router), le, source) == []
 
         {le, source} = build_data.(["2", "6", "0"], nil)
-        assert unquote(router).matching_rules(le, source) == []
+
+        assert matching_rules(unquote(router), le, source) == []
       end
 
       test "list_includes operator on non-list", %{user: user} do
@@ -138,10 +180,12 @@ defmodule Logflare.Sources.SourceRouterTest do
         end
 
         {le, source} = build_data.("Chrome", "HomeAssistant/2026.2.2 aiohttp/3.13.3 Python/3.13")
-        assert unquote(router).matching_rules(le, source) == []
+
+        assert matching_rules(unquote(router), le, source) == []
 
         {le, source} = build_data.("Chrome", "Chrome")
-        assert unquote(router).matching_rules(le, source) == source.rules
+
+        assert matching_rules(unquote(router), le, source) == source.rules
       end
 
       test "list_includes_regexp operator", %{user: user} do
@@ -170,16 +214,20 @@ defmodule Logflare.Sources.SourceRouterTest do
         end
 
         {le, source} = build_data.(["a", "b", "abc123"], "23")
-        assert unquote(router).matching_rules(le, source) == source.rules
+
+        assert matching_rules(unquote(router), le, source) == source.rules
 
         {le, source} = build_data.(["a", "b", "abc123"], "a\",")
-        assert unquote(router).matching_rules(le, source) == []
+
+        assert matching_rules(unquote(router), le, source) == []
 
         {le, source} = build_data.("a, b, abc123", "b,")
-        assert unquote(router).matching_rules(le, source) == source.rules
+
+        assert matching_rules(unquote(router), le, source) == source.rules
 
         {le, source} = build_data.([], "23")
-        assert unquote(router).matching_rules(le, source) == []
+
+        assert matching_rules(unquote(router), le, source) == []
       end
 
       test "string_contains operator", %{user: user} do
@@ -208,13 +256,16 @@ defmodule Logflare.Sources.SourceRouterTest do
         end
 
         {le, source} = build_data.("log error string", "error")
-        assert unquote(router).matching_rules(le, source) == source.rules
+
+        assert matching_rules(unquote(router), le, source) == source.rules
 
         {le, source} = build_data.("log info string", "error")
-        assert unquote(router).matching_rules(le, source) == []
+
+        assert matching_rules(unquote(router), le, source) == []
 
         {le, source} = build_data.("stringstring", "string")
-        assert unquote(router).matching_rules(le, source) == source.rules
+
+        assert matching_rules(unquote(router), le, source) == source.rules
       end
 
       test "string_contains operator 1", %{user: user} do
@@ -246,7 +297,8 @@ defmodule Logflare.Sources.SourceRouterTest do
         end
 
         {le, source} = build_data.("ten three")
-        assert unquote(router).matching_rules(le, source) == source.rules
+
+        assert matching_rules(unquote(router), le, source) == source.rules
       end
 
       test "regex match operator", %{user: user} do
@@ -275,10 +327,12 @@ defmodule Logflare.Sources.SourceRouterTest do
         end
 
         {le, source} = build_data.("111", ~S|\d\d\d|)
-        assert unquote(router).matching_rules(le, source) == source.rules
+
+        assert matching_rules(unquote(router), le, source) == source.rules
 
         {le, source} = build_data.("11z", ~S|\d\d\d|)
-        assert unquote(router).matching_rules(le, source) == []
+
+        assert matching_rules(unquote(router), le, source) == []
       end
 
       test "regex match on integer/float fields", %{user: user} do
@@ -303,7 +357,8 @@ defmodule Logflare.Sources.SourceRouterTest do
         end
 
         {le, source} = build_data.(123, "123")
-        assert unquote(router).matching_rules(le, source) == source.rules
+
+        assert matching_rules(unquote(router), le, source) == source.rules
       end
 
       test "gt,lt,gte,lte operators", %{user: user} do
@@ -332,16 +387,20 @@ defmodule Logflare.Sources.SourceRouterTest do
         end
 
         {le, source} = build_data.(100, 1, :>)
-        assert unquote(router).matching_rules(le, source) == source.rules
+
+        assert matching_rules(unquote(router), le, source) == source.rules
 
         {le, source} = build_data.(100, 200, :<)
-        assert unquote(router).matching_rules(le, source) == source.rules
+
+        assert matching_rules(unquote(router), le, source) == source.rules
 
         {le, source} = build_data.(1, 1, :>=)
-        assert unquote(router).matching_rules(le, source) == source.rules
+
+        assert matching_rules(unquote(router), le, source) == source.rules
 
         {le, source} = build_data.(1, 1, :<=)
-        assert unquote(router).matching_rules(le, source) == source.rules
+
+        assert matching_rules(unquote(router), le, source) == source.rules
       end
 
       test "multiple filters", %{user: user} do
@@ -377,10 +436,12 @@ defmodule Logflare.Sources.SourceRouterTest do
         end
 
         {le, source} = build_data.(0, "string")
-        assert unquote(router).matching_rules(le, source) == source.rules
+
+        assert matching_rules(unquote(router), le, source) == source.rules
 
         {le, source} = build_data.(1, "string")
-        assert unquote(router).matching_rules(le, source) == []
+
+        assert matching_rules(unquote(router), le, source) == []
       end
 
       test "multiple filters with negation", %{user: user} do
@@ -415,10 +476,12 @@ defmodule Logflare.Sources.SourceRouterTest do
         end
 
         {le, source} = build_data.(0, "string")
-        assert unquote(router).matching_rules(le, source) == []
+
+        assert matching_rules(unquote(router), le, source) == []
 
         {le, source} = build_data.(1, "string")
-        assert unquote(router).matching_rules(le, source) == source.rules
+
+        assert matching_rules(unquote(router), le, source) == source.rules
       end
 
       test "multiple negated filter", %{user: user} do
@@ -453,13 +516,16 @@ defmodule Logflare.Sources.SourceRouterTest do
         end
 
         {le, source} = build_data.("info")
-        assert unquote(router).matching_rules(le, source) == []
+
+        assert matching_rules(unquote(router), le, source) == []
 
         {le, source} = build_data.("error")
-        assert unquote(router).matching_rules(le, source) == []
+
+        assert matching_rules(unquote(router), le, source) == []
 
         {le, source} = build_data.("warn")
-        assert unquote(router).matching_rules(le, source) == source.rules
+
+        assert matching_rules(unquote(router), le, source) == source.rules
       end
 
       test "nested lists with maps lvl4", %{user: user} do
@@ -519,7 +585,8 @@ defmodule Logflare.Sources.SourceRouterTest do
         }
 
         {le, source} = build_data.(metadata, "value")
-        assert unquote(router).matching_rules(le, source) == source.rules
+
+        assert matching_rules(unquote(router), le, source) == source.rules
       end
 
       test "nested lists with maps lvl1", %{user: user} do
@@ -555,7 +622,8 @@ defmodule Logflare.Sources.SourceRouterTest do
         }
 
         {le, source} = build_data.(metadata, "value")
-        assert unquote(router).matching_rules(le, source) == source.rules
+
+        assert matching_rules(unquote(router), le, source) == source.rules
       end
 
       test "range operator", %{user: user} do
@@ -584,16 +652,20 @@ defmodule Logflare.Sources.SourceRouterTest do
         end
 
         {le, source} = build_data.(6, 1, 10, %{})
-        assert unquote(router).matching_rules(le, source) == source.rules
+
+        assert matching_rules(unquote(router), le, source) == source.rules
 
         {le, source} = build_data.(6, 1, 10, %{negate: true})
-        assert unquote(router).matching_rules(le, source) == []
+
+        assert matching_rules(unquote(router), le, source) == []
 
         {le, source} = build_data.(100, 101, 500, %{})
-        assert unquote(router).matching_rules(le, source) == []
+
+        assert matching_rules(unquote(router), le, source) == []
 
         {le, source} = build_data.(100, 101, 500, %{negate: true})
-        assert unquote(router).matching_rules(le, source) == source.rules
+
+        assert matching_rules(unquote(router), le, source) == source.rules
       end
     end
 
@@ -642,22 +714,28 @@ defmodule Logflare.Sources.SourceRouterTest do
         }
 
         {le, source} = build_data.(metadata, 2)
-        assert unquote(router).matching_rules(le, source) == source.rules
+
+        assert matching_rules(unquote(router), le, source) == source.rules
 
         {le, source} = build_data.(metadata, 4)
-        assert unquote(router).matching_rules(le, source) == source.rules
+
+        assert matching_rules(unquote(router), le, source) == source.rules
 
         {le, source} = build_data.(metadata, 400)
-        assert unquote(router).matching_rules(le, source) == source.rules
+
+        assert matching_rules(unquote(router), le, source) == source.rules
 
         {le, source} = build_data.(metadata, 350)
-        assert unquote(router).matching_rules(le, source) == []
+
+        assert matching_rules(unquote(router), le, source) == []
 
         {le, source} = build_data.(metadata, nil)
-        assert unquote(router).matching_rules(le, source) == []
+
+        assert matching_rules(unquote(router), le, source) == []
 
         {le, source} = build_data.(metadata, "200")
-        assert unquote(router).matching_rules(le, source) == []
+
+        assert matching_rules(unquote(router), le, source) == []
       end
 
       test "multiple matches and multiple rules with lists", %{user: user} do
@@ -701,11 +779,13 @@ defmodule Logflare.Sources.SourceRouterTest do
         }
 
         {le, source} = build_data.(metadata, 2)
-        assert unquote(router).matching_rules(le, source) == []
+
+        assert matching_rules(unquote(router), le, source) == []
 
         metadata = %{metadata | "ref" => "valid"}
         {le, source} = build_data.(metadata, 2)
-        assert unquote(router).matching_rules(le, source) == source.rules
+
+        assert matching_rules(unquote(router), le, source) == source.rules
       end
 
       test "eq operator with nested maps lvl4", %{user: user} do
@@ -765,7 +845,8 @@ defmodule Logflare.Sources.SourceRouterTest do
         }
 
         {le, source} = build_data.(metadata, "value")
-        assert unquote(router).matching_rules(le, source) == source.rules
+
+        assert matching_rules(unquote(router), le, source) == source.rules
       end
 
       test "eq operator with nested maps lvl1", %{user: user} do
@@ -801,7 +882,8 @@ defmodule Logflare.Sources.SourceRouterTest do
         }
 
         {le, source} = build_data.(metadata, "value")
-        assert unquote(router).matching_rules(le, source) == source.rules
+
+        assert matching_rules(unquote(router), le, source) == source.rules
       end
     end
   end
@@ -841,5 +923,10 @@ defmodule Logflare.Sources.SourceRouterTest do
       assert_receive {:telemetry_event, [:logflare, :sources, :source_router, :dropped],
                       %{count: 1}, %{reason: :source_unavailable, source_id: ^source_id}}
     end
+  end
+
+  @spec matching_rules(module(), LogEvent.t(), Logflare.Sources.Source.t()) :: [Rule.t()]
+  defp matching_rules(router, event, source) do
+    router.matching_rules(event, source, router.list_enabled_rules(source))
   end
 end

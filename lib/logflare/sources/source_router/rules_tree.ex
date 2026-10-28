@@ -1,14 +1,16 @@
 defmodule Logflare.Sources.SourceRouter.RulesTree do
   @moduledoc false
-  alias Logflare.Backends
-  alias Logflare.LogEvent
-  alias Logflare.Rules
-  alias Logflare.Rules.Rule
-  alias Logflare.Lql.Rules.FilterRule
+
+  @behaviour Logflare.Sources.SourceRouter
 
   import Logflare.Utils, only: [stringify: 1]
 
-  @behaviour Logflare.Sources.SourceRouter
+  alias Logflare.LogEvent
+  alias Logflare.Lql.Rules.FilterRule
+  alias Logflare.Rules
+  alias Logflare.Rules.Rule
+  alias Logflare.Sources.Source
+  alias Logflare.Sources.SourceRouter
 
   @type t() :: [entry()]
   @type entry() ::
@@ -22,18 +24,27 @@ defmodule Logflare.Sources.SourceRouter.RulesTree do
   @type eq_index() :: %{term() => target() | [target()]}
 
   @type filter_set() :: non_neg_integer()
+  @type enabled_rules() :: {t(), MapSet.t(Rule.id())}
 
   @impl true
-  def matching_rules(event, source) do
-    rule_set = Rules.Cache.rules_tree_by_source_id(source.id)
+  @spec list_enabled_rules(Source.t()) :: enabled_rules()
+  def list_enabled_rules(source) do
+    enabled_ids =
+      source
+      |> Rules.Cache.list_rules()
+      |> SourceRouter.filter_enabled_rules()
+      |> MapSet.new(& &1.id)
 
+    {Rules.Cache.rules_tree_by_source_id(source.id), enabled_ids}
+  end
+
+  @impl true
+  @spec matching_rules(LogEvent.t(), Source.t(), enabled_rules()) :: [Rule.t()]
+  def matching_rules(event, _source, {rule_set, enabled_ids}) do
     matching_rule_ids(event, rule_set)
+    |> Enum.filter(&MapSet.member?(enabled_ids, &1))
     |> Rules.Cache.get_rules()
-    |> Enum.reject(fn
-      nil -> true
-      %Rule{backend_id: nil} -> false
-      %Rule{backend_id: id} -> match?(%{enabled: false}, Backends.Cache.get_backend(id))
-    end)
+    |> Enum.reject(&is_nil/1)
   end
 
   @doc """

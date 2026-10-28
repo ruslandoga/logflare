@@ -9,30 +9,59 @@ defmodule Logflare.Sources.SourceRouter do
   @default_router Logflare.Sources.SourceRouter.RulesTree
 
   @doc """
-  Returns rules matching the provided log event.
+  Loads cached rules and excludes disabled backend destinations for a batch.
 
-  Implementations must exclude rules targeting disabled backends. Rules targeting
-  sink sources remain eligible.
+  Rules targeting sink sources must remain eligible.
   """
-  @callback matching_rules(LE.t(), Source.t()) :: [Rule.t()]
+  @callback list_enabled_rules(Source.t()) :: term()
+
+  @doc """
+  Returns rules matching the provided log event from a prepared rule set.
+
+  The rule set must exclude disabled backend destinations and retain sink sources.
+  """
+  @callback matching_rules(LE.t(), Source.t(), term()) :: [Rule.t()]
 
   @spec route_to_sinks_and_ingest(LE.t() | [LE.t()], Source.t(), module()) :: LE.t() | [LE.t()]
   def route_to_sinks_and_ingest(events, source, router \\ @default_router)
 
-  def route_to_sinks_and_ingest(events, source, router) when is_list(events),
-    do: Enum.map(events, &route_to_sinks_and_ingest(&1, source, router))
+  def route_to_sinks_and_ingest([], _source, _router), do: []
 
-  def route_to_sinks_and_ingest(%LE{via_rule_id: id} = le, _source, _router) when id != nil,
-    do: le
+  def route_to_sinks_and_ingest(events, source, router) when is_list(events) do
+    rules = router.list_enabled_rules(source)
 
-  def route_to_sinks_and_ingest(%LE{via_rule_id: nil} = le, source, router) do
-    for %Rule{} = rule <- router.matching_rules(le, source) do
+    for %LE{via_rule_id: nil} = le <- events,
+        %Rule{} = rule <- router.matching_rules(le, source, rules) do
       rule
       |> do_routing(le, source)
       |> maybe_emit_dropped(rule, source)
     end
 
+    events
+  end
+
+  def route_to_sinks_and_ingest(%LE{via_rule_id: id} = le, _source, _router) when id != nil,
+    do: le
+
+  def route_to_sinks_and_ingest(%LE{via_rule_id: nil} = le, source, router) do
+    route_to_sinks_and_ingest([le], source, router)
     le
+  end
+
+  @spec filter_enabled_rules([Rule.t()]) :: [Rule.t()]
+  def filter_enabled_rules(rules) do
+    enabled_backends =
+      rules
+      |> Enum.uniq_by(& &1.backend_id)
+      |> Map.new(fn
+        %Rule{backend_id: nil} ->
+          {nil, true}
+
+        %Rule{backend_id: id} ->
+          {id, not match?(%{enabled: false}, Backends.Cache.get_backend(id))}
+      end)
+
+    Enum.filter(rules, &Map.fetch!(enabled_backends, &1.backend_id))
   end
 
   @spec maybe_emit_dropped(term(), Rule.t(), Source.t()) :: :ok
