@@ -1,5 +1,6 @@
 defmodule Logflare.Sources.SourceRouter.RulesTree do
   @moduledoc false
+  alias Logflare.Backends
   alias Logflare.LogEvent
   alias Logflare.Rules
   alias Logflare.Rules.Rule
@@ -28,7 +29,11 @@ defmodule Logflare.Sources.SourceRouter.RulesTree do
 
     matching_rule_ids(event, rule_set)
     |> Rules.Cache.get_rules()
-    |> Enum.reject(&is_nil/1)
+    |> Enum.reject(fn
+      nil -> true
+      %Rule{backend_id: nil} -> false
+      %Rule{backend_id: id} -> match?(%{enabled: false}, Backends.Cache.get_backend(id))
+    end)
   end
 
   @doc """

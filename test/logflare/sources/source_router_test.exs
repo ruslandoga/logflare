@@ -56,6 +56,39 @@ defmodule Logflare.Sources.SourceRouterTest do
         assert rule_id == rule.id
       end
 
+      test "excludes disabled backends and resumes after backend-only invalidation", %{
+        user: user,
+        backend: backend
+      } do
+        disabled = insert(:backend, user: user, enabled: false)
+        sink = insert(:source, user: user)
+
+        source =
+          insert(:source,
+            user: user,
+            rules: [
+              build(:rule, backend: backend, lql_string: "testing"),
+              build(:rule, backend: disabled, lql_string: "testing"),
+              build(:rule, sink: sink.token, lql_string: "testing")
+            ]
+          )
+
+        [enabled_rule, disabled_rule, sink_rule] = source.rules
+        le = build(:log_event, source: source, message: "testing123")
+        matched_ids = Enum.map(unquote(router).matching_rules(le, source), & &1.id)
+        assert Enum.sort(matched_ids) == Enum.sort([enabled_rule.id, sink_rule.id])
+
+        cached_tree = Rules.Cache.rules_tree_by_source_id(source.id)
+        assert disabled_rule.id in SourceRouter.RulesTree.matching_rule_ids(le, cached_tree)
+
+        disabled |> Ecto.Changeset.change(enabled: true) |> Repo.update!()
+        Logflare.ContextCache.bust_keys([{Logflare.Backends, disabled.id}])
+
+        matched_ids = Enum.map(unquote(router).matching_rules(le, source), & &1.id)
+        assert Enum.sort(matched_ids) == Enum.sort(Enum.map(source.rules, & &1.id))
+        assert Rules.Cache.rules_tree_by_source_id(source.id) == cached_tree
+      end
+
       test "list_includes operator", %{user: user} do
         build_data = fn metadata_val, filter_val ->
           rule = %Rule{

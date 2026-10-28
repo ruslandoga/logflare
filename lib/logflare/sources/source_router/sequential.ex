@@ -1,6 +1,7 @@
 defmodule Logflare.Sources.SourceRouter.Sequential do
   @moduledoc false
 
+  alias Logflare.Backends
   alias Logflare.LogEvent, as: LE
   alias Logflare.Lql.Rules.FilterRule
   alias Logflare.Rules
@@ -12,7 +13,10 @@ defmodule Logflare.Sources.SourceRouter.Sequential do
   def matching_rules(le, source) do
     rules = Rules.Cache.list_rules(source)
 
-    for %Rule{lql_filters: [_ | _]} = rule <- rules, route_with_lql_rules?(le, rule) do
+    for %Rule{lql_filters: [_ | _]} = rule <- rules,
+        rule.backend_id == nil or
+          not match?(%{enabled: false}, Backends.Cache.get_backend(rule.backend_id)),
+        route_with_lql_rules?(le, rule) do
       rule
     end
   end

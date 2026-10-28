@@ -9,7 +9,10 @@ defmodule Logflare.Sources.SourceRouter do
   @default_router Logflare.Sources.SourceRouter.RulesTree
 
   @doc """
-  An algorithm returning Rules that match provided LogEvent
+  Returns rules matching the provided log event.
+
+  Implementations must exclude rules targeting disabled backends. Rules targeting
+  sink sources remain eligible.
   """
   @callback matching_rules(LE.t(), Source.t()) :: [Rule.t()]
 
