@@ -64,6 +64,7 @@ defmodule Logflare.Backends.Spool.ConsumerPipelineTest do
                ConsumerPipeline.handle_message(:default, message, %{})
     end
 
+    @tag capture_log: true
     test "fails only this message when a segment's content cannot be parsed at all" do
       # Well-formed bytes that passed framing/CRC upstream, but not a valid
       # Erlang external term — exactly the ArgumentError :erlang.binary_to_term/1
@@ -257,6 +258,7 @@ defmodule Logflare.Backends.Spool.ConsumerPipelineTest do
                       %{count: 1}, %{reason: :missing_source_id}}
     end
 
+    @tag capture_log: true
     test "a raising dispatch fails only that source's messages", %{source: source} do
       TestUtils.attach_forwarder([:logflare, :backends, :spool, :consumer, :skipped])
 
@@ -322,6 +324,7 @@ defmodule Logflare.Backends.Spool.ConsumerPipelineTest do
                       %{count: 1}, %{reason: :unknown_source_id}}
     end
 
+    @tag capture_log: true
     test "does not fail a handle's message when only a different handle's dispatch for the same source fails" do
       source = insert(:source, user: insert(:user))
       failing_handle = "spool-handle-failing-#{System.unique_integer([:positive])}"
@@ -359,6 +362,7 @@ defmodule Logflare.Backends.Spool.ConsumerPipelineTest do
   end
 
   describe "ack/3" do
+    @tag capture_log: true
     test "emits messages_failed telemetry when Broadway marks messages as failed" do
       TestUtils.attach_forwarder([:logflare, :backends, :spool, :consumer, :messages_failed])
 
@@ -386,6 +390,7 @@ defmodule Logflare.Backends.Spool.ConsumerPipelineTest do
                       [:logflare, :backends, :spool, :consumer, :messages_failed], _, _}
     end
 
+    @tag capture_log: true
     test "releases a segment's bump only when it succeeds, not when dispatch fails" do
       success_handle = "spool-handle-#{System.unique_integer([:positive])}"
       failed_handle = "spool-handle-#{System.unique_integer([:positive])}"
@@ -393,6 +398,7 @@ defmodule Logflare.Backends.Spool.ConsumerPipelineTest do
       SpoolAck.bump(success_handle, 1)
       SpoolAck.register(failed_handle, QueueMod, "queue-url")
       SpoolAck.bump(failed_handle, 1)
+      on_exit(fn -> :ets.delete(:spool_ack, failed_handle) end)
 
       test_pid = self()
       stub(QueueMod, :ack, fn url, h -> send(test_pid, {:acked, url, h}) end)
@@ -422,6 +428,7 @@ defmodule Logflare.Backends.Spool.ConsumerPipelineTest do
                :ets.lookup(:spool_ack, failed_handle)
     end
 
+    @tag capture_log: true
     test "returns each message's bytes (not its count) to the producer's in-flight budget" do
       ref = :atomics.new(1, signed: true)
       :atomics.add(ref, 1, 300)

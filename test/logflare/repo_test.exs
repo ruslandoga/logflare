@@ -5,13 +5,20 @@ defmodule Logflare.RepoTest do
   alias Logflare.Repo
   alias Logflare.Repo.Replicas
 
-  defp start_read_replicas(raw_entries, entry_overrides \\ []) do
+  @spec start_read_replicas([String.t()], keyword(), keyword()) :: pid() | :undefined
+  defp start_read_replicas(raw_entries, entry_overrides \\ [], opts \\ []) do
     primary_hostname = Keyword.fetch!(Repo.config(), :hostname)
 
     entries =
       Enum.map(raw_entries, fn entry ->
         {key, config} = Replicas.parse!(entry)
-        {key, Keyword.merge(config, entry_overrides)}
+
+        config =
+          [pool_size: 1]
+          |> Keyword.merge(config)
+          |> Keyword.merge(entry_overrides)
+
+        {key, config}
       end)
 
     for {_key, config} <- entries do
@@ -31,19 +38,34 @@ defmodule Logflare.RepoTest do
     start_result = start_supervised!({Replicas, entries: entries})
 
     for {_key, config} <- entries do
-      assert_receive {[:ecto, :repo, :init], ^telemetry_ref, _, %{repo: Repo, opts: opts}}
+      assert_receive {[:ecto, :repo, :init], ^telemetry_ref, _, %{repo: Repo, opts: repo_opts}}
 
       for {k, v} <- config,
           k not in [:ssl, :logflare_auth, :logflare_aws_region] do
-        assert Keyword.fetch!(opts, k) == v
+        assert Keyword.fetch!(repo_opts, k) == v
       end
 
-      refute Keyword.has_key?(opts, :logflare_connection_role)
-      refute Keyword.has_key?(opts, :logflare_auth)
-      refute Keyword.has_key?(opts, :logflare_aws_region)
+      refute Keyword.has_key?(repo_opts, :logflare_connection_role)
+      refute Keyword.has_key?(repo_opts, :logflare_auth)
+      refute Keyword.has_key?(repo_opts, :logflare_aws_region)
 
       assert {Replicas, :after_connect, [_primary_after_connect]} =
-               Keyword.fetch!(opts, :after_connect)
+               Keyword.fetch!(repo_opts, :after_connect)
+    end
+
+    previous_repo = Repo.get_dynamic_repo()
+    unreachable_entries = Keyword.get(opts, :unreachable_entries, [])
+
+    try do
+      for {entry, {key, _config}} <- Enum.zip(raw_entries, entries),
+          entry not in unreachable_entries do
+        Repo.put_dynamic_repo(Replicas.lookup!(key))
+
+        assert %Postgrex.Result{rows: [["on"]]} =
+                 Repo.query!("SHOW default_transaction_read_only", [])
+      end
+    after
+      Repo.put_dynamic_repo(previous_repo)
     end
 
     start_result
@@ -176,7 +198,11 @@ defmodule Logflare.RepoTest do
     end
 
     test "supports declaring a replica as a URI alongside a bare hostname" do
-      start_read_replicas(["127.0.0.1", "postgres://127.0.0.2:5433/replica_db"])
+      unreachable_entry = "postgres://127.0.0.2:5433/replica_db"
+
+      start_read_replicas(["127.0.0.1", unreachable_entry], [],
+        unreachable_entries: [unreachable_entry]
+      )
 
       repos = for _ <- 1..30, do: Repo.apply_with_replica(Repo, :get_dynamic_repo, [])
       assert Enum.all?(repos, &(&1 != Repo))

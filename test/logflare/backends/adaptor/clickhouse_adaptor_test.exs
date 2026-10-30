@@ -123,6 +123,7 @@ defmodule Logflare.Backends.Adaptor.ClickHouseAdaptorTest do
               }} = ClickHouseAdaptor.execute_ch_query(backend, "SELECT notthere")
     end
 
+    @tag capture_log: true
     test "normalizes ClickHouse server errors as backend errors", %{backend: backend} do
       expect(Ch, :query, fn _pool, _statement, _params, _opts ->
         {:error, %Ch.Error{code: 999, message: "Backend server error"}}
@@ -255,6 +256,7 @@ defmodule Logflare.Backends.Adaptor.ClickHouseAdaptorTest do
       assert measurements.idle_time < minute_in_native
     end
 
+    @tag capture_log: true
     test "emits checkout error telemetry when the pool sheds a checkout", %{backend: backend} do
       TestUtils.attach_forwarder([:logflare, :clickhouse, :read_pool, :checkout_error])
 
@@ -272,6 +274,7 @@ defmodule Logflare.Backends.Adaptor.ClickHouseAdaptorTest do
       assert metadata.reason == :queue_timeout
     end
 
+    @tag capture_log: true
     test "tags non-queue checkout failures with the error reason", %{backend: backend} do
       TestUtils.attach_forwarder([:logflare, :clickhouse, :read_pool, :checkout_error])
 
@@ -288,6 +291,7 @@ defmodule Logflare.Backends.Adaptor.ClickHouseAdaptorTest do
                       %{count: 1}, %{reason: :error}}
     end
 
+    @tag capture_log: true
     test "does not record checkout latency for a failed checkout", %{backend: backend} do
       TestUtils.attach_forwarder([:logflare, :clickhouse, :read_pool, :checkout])
 
@@ -325,6 +329,7 @@ defmodule Logflare.Backends.Adaptor.ClickHouseAdaptorTest do
       refute log =~ "ClickHouse slow connection checkout"
     end
 
+    @tag capture_log: true
     test "still emits query error telemetry for a connection error after checkout",
          %{backend: backend} do
       TestUtils.attach_forwarder([:logflare, :clickhouse, :read_pool, :checkout_error])
@@ -356,6 +361,7 @@ defmodule Logflare.Backends.Adaptor.ClickHouseAdaptorTest do
                       %{connection_time: _}, _}
     end
 
+    @tag capture_log: true
     test "emits query error telemetry with the error kind", %{backend: backend} do
       TestUtils.attach_forwarder([:logflare, :clickhouse, :read_pool, :query_error])
 
@@ -1419,6 +1425,7 @@ defmodule Logflare.Backends.Adaptor.ClickHouseAdaptorTest do
     test "emits a single query error when the failover retry also fails" do
       {_source, backend} =
         setup_clickhouse_test(
+          cleanup?: false,
           config: %{
             read_only_urls: %{
               "api" => "http://localhost:8123",
@@ -1449,6 +1456,7 @@ defmodule Logflare.Backends.Adaptor.ClickHouseAdaptorTest do
       refute_received {:telemetry_event, [:logflare, :clickhouse, :read_pool, :query_error], _, _}
     end
 
+    @tag capture_log: true
     test "preserves the endpoint limit when falling back to the default cluster" do
       {_source, backend} =
         setup_clickhouse_test(
@@ -1482,6 +1490,7 @@ defmodule Logflare.Backends.Adaptor.ClickHouseAdaptorTest do
       assert ConnectionManager.pool_active?(backend, "dashboard_logs")
     end
 
+    @tag capture_log: true
     test "does not fall back when the requested cluster pool is exhausted" do
       {_source, backend} =
         setup_clickhouse_test(
@@ -1505,9 +1514,11 @@ defmodule Logflare.Backends.Adaptor.ClickHouseAdaptorTest do
       refute ConnectionManager.pool_active?(backend, "dashboard_logs")
     end
 
+    @tag capture_log: true
     test "does not fall back when the unhealthy cluster is already the default" do
       {_source, backend} =
         setup_clickhouse_test(
+          cleanup?: false,
           config: %{
             read_only_urls: %{"dashboard_logs" => "http://localhost:8123"},
             default_read_cluster: "dashboard_logs"
@@ -1560,6 +1571,7 @@ defmodule Logflare.Backends.Adaptor.ClickHouseAdaptorTest do
     test "returns a connection error when the default cluster pool cannot start" do
       {_source, backend} =
         setup_clickhouse_test(
+          cleanup?: false,
           config: %{
             read_only_urls: %{"dashboard_logs" => "http://localhost:8123"},
             default_read_cluster: "dashboard_logs"
@@ -1589,6 +1601,7 @@ defmodule Logflare.Backends.Adaptor.ClickHouseAdaptorTest do
     test "attributes the query error to the read cluster that was actually queried" do
       {_source, backend} =
         setup_clickhouse_test(
+          cleanup?: false,
           config: %{
             read_only_urls: %{"adhoc" => "http://adhoc-read.local:8123"},
             default_read_cluster: "adhoc"
@@ -3472,8 +3485,19 @@ defmodule Logflare.Backends.Adaptor.ClickHouseAdaptorTest do
 
       via = Backends.via_backend(backend, ConnectionManager)
       assert original_pid = GenServer.whereis(via)
+      assert original_pool = ConnectionManager.get_pool_pid(backend)
+      manager_ref = Process.monitor(original_pid)
+      pool_ref = Process.monitor(original_pool)
 
-      Process.exit(original_pid, :kill)
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          Process.exit(original_pid, :kill)
+
+          assert_receive {:DOWN, ^manager_ref, :process, ^original_pid, :killed}, 1_000
+          assert_receive {:DOWN, ^pool_ref, :process, ^original_pool, :killed}, 1_000
+        end)
+
+      assert log =~ "killed"
 
       TestUtils.retry_assert(fn ->
         assert {:ok, {[%{"result" => 2}], _bytes}} =
@@ -3482,6 +3506,7 @@ defmodule Logflare.Backends.Adaptor.ClickHouseAdaptorTest do
         assert new_pid = GenServer.whereis(via)
         assert new_pid != original_pid
         assert ConnectionManager.pool_active?(backend)
+        assert ConnectionManager.get_pool_pid(backend) != original_pool
       end)
     end
 

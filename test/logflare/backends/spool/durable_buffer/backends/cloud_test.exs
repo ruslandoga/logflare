@@ -190,14 +190,19 @@ defmodule Logflare.Backends.Spool.DurableBuffer.Backends.CloudTest do
 
       config = config(%{max_commit_attempts: 1})
       {:ok, state} = Backend.open(config, 0)
+      tag = make_ref()
 
       {time_us, {:pending, new_state}} =
-        :timer.tc(fn -> Backend.commit_async(state, batch(["one"]), 0, {0, 1}, make_ref()) end)
+        :timer.tc(fn -> Backend.commit_async(state, batch(["one"]), 0, {0, 1}, tag) end)
 
       assert time_us < 50_000
       assert map_size(new_state.inflight) == 1
       refute_receive {:put, _}, 10
-      assert_receive {:put, _body}, 200
+      assert_receive {:put, body}, 200
+      assert {:ok, ["one"]} = decode_segments(body)
+      assert_receive {:backend, {^tag, :ok}}, 200
+      assert {[{^tag, :ok}], new_state} = Backend.handle_message({tag, :ok}, new_state)
+      assert new_state.inflight == %{}
     end
 
     test "resolves the tag with :ok and reports upload health recovery once the upload settles" do
@@ -235,9 +240,15 @@ defmodule Logflare.Backends.Spool.DurableBuffer.Backends.CloudTest do
     end
 
     test "a :DOWN from the task being killed outright still resolves the tag, instead of wedging every later commit on the partition behind it" do
+      test_pid = self()
+
       stub(StorageMod, :put, fn _b, _k, _body, _opts ->
-        # Never actually reached — the task is killed before this runs.
-        {:ok, %{}}
+        owner_ref = Process.monitor(test_pid)
+        send(test_pid, {:upload_started, self()})
+
+        receive do
+          {:DOWN, ^owner_ref, :process, ^test_pid, _reason} -> exit(:shutdown)
+        end
       end)
 
       config = config(%{max_commit_attempts: 1})
@@ -246,12 +257,18 @@ defmodule Logflare.Backends.Spool.DurableBuffer.Backends.CloudTest do
 
       assert {:pending, state} = Backend.commit_async(state, batch(["one"]), 0, {0, 1}, tag)
       assert [ref] = Map.keys(state.inflight)
+      assert_receive {:upload_started, task_pid}, 1_000
+      on_exit(fn -> Process.exit(task_pid, :kill) end)
+
+      Process.exit(task_pid, :kill)
+      assert_receive {:DOWN, ^ref, :process, ^task_pid, :killed} = down, 1_000
 
       assert {[{^tag, {:error, {:task_down, :killed}}}], new_state} =
-               Backend.handle_message({:DOWN, ref, :process, self(), :killed}, state)
+               Backend.handle_message(down, state)
 
       assert new_state.inflight == %{}
       assert Health.healthy?(:upload) == false
+      refute_received {:backend, {^tag, _result}}
     end
 
     test "a :DOWN for a tag already resolved by its own completion message is a no-op" do

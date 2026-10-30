@@ -1400,6 +1400,7 @@ defmodule Logflare.BackendsTest do
       refute Backends.source_sup_started?(source)
     end
 
+    @tag capture_log: true
     test "ingest_logs/4 writes nothing and returns source_unavailable when the start fails", %{
       source: source
     } do
@@ -1409,6 +1410,7 @@ defmodule Logflare.BackendsTest do
       assert {:error, :source_unavailable} = Backends.ingest_logs([%{"message" => "x"}], source)
     end
 
+    @tag capture_log: true
     test "dispatch_from_spool/3 writes nothing and returns source_unavailable when the start fails",
          %{source: source} do
       stub_failing_child_spec()
@@ -3243,6 +3245,7 @@ defmodule Logflare.BackendsTest do
       assert_receive :put_called, 1000
     end
 
+    @tag capture_log: true
     test "in :both mode, falls back to normal dispatch when no spool partition is registered (e.g. the subtree crashed and is mid-restart)",
          %{source: source} do
       # Simulates the only window this can actually happen in — see
@@ -3259,6 +3262,7 @@ defmodule Logflare.BackendsTest do
       assert {:ok, 1} = Backends.ingest_logs(params, source, nil, true)
     end
 
+    @tag capture_log: true
     test "in :producer mode, fails the request when no spool partition is registered, instead of falling back to a dispatch path with no backend adaptors to receive it",
          %{source: source} do
       stop_supervised!(SpoolDurableBufferSup)
