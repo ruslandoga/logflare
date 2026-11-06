@@ -290,6 +290,7 @@ defmodule Logflare.Backends.DynamicPipelineTest do
         sid_bid_pid = {source.id, backend.id, producer_pid}
         handle = "spool-handle-#{System.unique_integer([:positive])}"
         SpoolAck.register(handle, QueueMod, "queue-url")
+        on_exit(fn -> :ets.delete(:spool_ack, handle) end)
         le = %{build(:log_event, source: source) | spool_handle: handle}
         assert :ok = IngestEventQueue.add_to_table(sid_bid_pid, [le])
         {id, sid_bid_pid, handle}

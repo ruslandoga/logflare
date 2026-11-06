@@ -422,10 +422,14 @@ defmodule Logflare.Backends.IngestEventQueueTest do
       target = {sid, bid, self()}
       IngestEventQueue.upsert_tid(target)
 
-      moved_handle = "spool-handle-#{System.unique_integer([:positive])}"
-      stranded_handle = "spool-handle-#{System.unique_integer([:positive])}"
-      SpoolAck.register(moved_handle, QueueMod, "queue-url")
-      SpoolAck.register(stranded_handle, QueueMod, "queue-url")
+      moved_handle = register_spool_handle()
+      stranded_handle = register_spool_handle()
+      test_pid = self()
+
+      expect(QueueMod, :ack, fn url, handle ->
+        send(test_pid, {:acked, url, handle})
+        :ok
+      end)
 
       le = %{build(:log_event, message: "moved") | spool_handle: moved_handle}
 
@@ -440,6 +444,10 @@ defmodule Logflare.Backends.IngestEventQueueTest do
 
       assert {:ok, 1} = IngestEventQueue.move(queue, target)
 
+      assert_receive {:acked, "queue-url", ^stranded_handle}
+      :sys.get_state(SpoolAck)
+
+      refute_received {:acked, "queue-url", ^moved_handle}
       assert :ets.lookup(:spool_ack, stranded_handle) == []
 
       assert [{^moved_handle, 1, QueueMod, "queue-url", _registered_at}] =
@@ -523,8 +531,7 @@ defmodule Logflare.Backends.IngestEventQueueTest do
       source: source,
       source_backend_pid: sbp
     } do
-      handle = "spool-handle-#{System.unique_integer([:positive])}"
-      SpoolAck.register(handle, QueueMod, "queue-url")
+      handle = register_spool_handle()
 
       events = for _ <- 1..5, do: %{build(:log_event, source: source) | spool_handle: handle}
       assert :ok = IngestEventQueue.add_to_table(sbp, events)
@@ -983,8 +990,7 @@ defmodule Logflare.Backends.IngestEventQueueTest do
 
     test "reserves a handle's units before any of its pointers become visible to a claimer",
          %{source: source, sbp: sbp} do
-      handle = "spool-handle-#{System.unique_integer([:positive])}"
-      SpoolAck.register(handle, QueueMod, "queue-url")
+      handle = register_spool_handle()
 
       test_pid = self()
 
@@ -1004,8 +1010,7 @@ defmodule Logflare.Backends.IngestEventQueueTest do
 
     test "bumps once for a batch sharing a handle, compensating a losing insert_new/2 within it",
          %{source: source, sbp: sbp} do
-      handle = "spool-handle-#{System.unique_integer([:positive])}"
-      SpoolAck.register(handle, QueueMod, "queue-url")
+      handle = register_spool_handle()
 
       winner = %{build(:log_event, source: source) | spool_handle: handle}
       loser = %{winner | body: Map.put(winner.body, "event_message", "newer")}
@@ -1156,8 +1161,7 @@ defmodule Logflare.Backends.IngestEventQueueTest do
       source: source,
       sbp: {sid, bid, _pid} = sbp
     } do
-      handle = "spool-handle-#{System.unique_integer([:positive])}"
-      SpoolAck.register(handle, QueueMod, "queue-url")
+      handle = register_spool_handle()
 
       event = %{build(:log_event, source: source) | spool_handle: handle}
       assert :ok = IngestEventQueue.add_to_table(sbp, [event])
@@ -1188,8 +1192,7 @@ defmodule Logflare.Backends.IngestEventQueueTest do
       assert :ok = IngestEventQueue.add_to_table(sbp, [event])
       assert {:ok, [pointer], _tid} = IngestEventQueue.pop_pending_pointers(sbp, 1)
 
-      dangling_handle = "spool-handle-#{System.unique_integer([:positive])}"
-      SpoolAck.register(dangling_handle, QueueMod, "queue-url")
+      dangling_handle = register_spool_handle()
       SpoolAck.bump(dangling_handle, 1)
 
       test_pid = self()
@@ -1693,8 +1696,7 @@ defmodule Logflare.Backends.IngestEventQueueTest do
       key: key,
       source: source
     } do
-      handle = "spool-handle-#{System.unique_integer([:positive])}"
-      SpoolAck.register(handle, QueueMod, "queue-url")
+      handle = register_spool_handle()
 
       events = for _ <- 1..5, do: %{build(:log_event, source: source) | spool_handle: handle}
       :ok = IngestEventQueue.add_to_table(key, events)
@@ -2378,6 +2380,14 @@ defmodule Logflare.Backends.IngestEventQueueTest do
         formatters: [{Benchee.Formatters.Console, extended_statistics: true}]
       )
     end
+  end
+
+  @spec register_spool_handle() :: String.t()
+  defp register_spool_handle do
+    handle = "spool-handle-#{System.unique_integer([:positive])}"
+    SpoolAck.register(handle, QueueMod, "queue-url")
+    on_exit(fn -> :ets.delete(:spool_ack, handle) end)
+    handle
   end
 
   defp await_counter(counter, index, target) do
