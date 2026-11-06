@@ -786,6 +786,7 @@ defmodule Logflare.Sources.SourceRouterTest do
   end
 
   describe "routing to a sink whose SourceSup does not start" do
+    @tag capture_log: true
     test "emits a dropped event for the routed copy", %{user: user} do
       TestUtils.attach_forwarder([:logflare, :sources, :source_router, :dropped])
       sink = insert(:source, user: user)

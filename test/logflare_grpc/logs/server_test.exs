@@ -17,6 +17,7 @@ defmodule LogflareGrpc.Logs.ServerTest do
     setup do
       user = insert(:user)
       source = insert(:source, user: user)
+      TestUtils.attach_forwarder([:grpc, :server, :rpc, :start])
 
       {:ok, _pid, port} = GRPC.Server.start_endpoint(LogflareGrpc.Endpoint, 0)
       on_exit(fn -> GRPC.Server.stop_endpoint(LogflareGrpc.Endpoint) end)
@@ -42,6 +43,7 @@ defmodule LogflareGrpc.Logs.ServerTest do
       assert {:ok, %ExportLogsServiceResponse{}} = emulate_request(channel, request)
     end
 
+    @tag capture_log: true
     test "returns NOT_FOUND when the source was deleted after the plug loaded it", %{
       source: source,
       user: user,
@@ -60,6 +62,7 @@ defmodule LogflareGrpc.Logs.ServerTest do
                emulate_request(channel, TestUtilsGrpc.random_otel_logs_request())
     end
 
+    @tag capture_log: true
     test "returns UNAVAILABLE when the SourceSup does not start in time", %{
       source: source,
       user: user,
@@ -80,6 +83,17 @@ defmodule LogflareGrpc.Logs.ServerTest do
   end
 
   defp emulate_request(channel, request) do
-    Stub.export(channel, request)
+    result = Stub.export(channel, request)
+
+    assert_receive {:telemetry_event, [:grpc, :server, :rpc, :start], _measurements,
+                    %{
+                      server: LogflareGrpc.Logs.Server,
+                      stream: %{payload: %{pid: stream_pid}}
+                    }}
+
+    ref = Process.monitor(stream_pid)
+    assert_receive {:DOWN, ^ref, :process, ^stream_pid, _reason}, 1_000
+
+    result
   end
 end
