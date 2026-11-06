@@ -3472,8 +3472,19 @@ defmodule Logflare.Backends.Adaptor.ClickHouseAdaptorTest do
 
       via = Backends.via_backend(backend, ConnectionManager)
       assert original_pid = GenServer.whereis(via)
+      assert original_pool = ConnectionManager.get_pool_pid(backend)
+      manager_ref = Process.monitor(original_pid)
+      pool_ref = Process.monitor(original_pool)
 
-      Process.exit(original_pid, :kill)
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          Process.exit(original_pid, :kill)
+
+          assert_receive {:DOWN, ^manager_ref, :process, ^original_pid, :killed}, 1_000
+          assert_receive {:DOWN, ^pool_ref, :process, ^original_pool, :killed}, 1_000
+        end)
+
+      assert log =~ "killed"
 
       TestUtils.retry_assert(fn ->
         assert {:ok, {[%{"result" => 2}], _bytes}} =
@@ -3482,6 +3493,7 @@ defmodule Logflare.Backends.Adaptor.ClickHouseAdaptorTest do
         assert new_pid = GenServer.whereis(via)
         assert new_pid != original_pid
         assert ConnectionManager.pool_active?(backend)
+        assert ConnectionManager.get_pool_pid(backend) != original_pool
       end)
     end
 
