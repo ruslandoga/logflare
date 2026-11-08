@@ -1,8 +1,6 @@
 defmodule LogflareWeb.MonacoEditorComponent do
-  use LogflareWeb, :live_component
-
   @moduledoc """
-  Provides a Monaco Editor component for creating LQL queries.
+  Provides a Monaco Editor component for creating SQL and PromQL queries.
 
   Expects following attributes:
     - `field`: a `Phoenix.HTML.FormField` for the query.
@@ -10,6 +8,7 @@ defmodule LogflareWeb.MonacoEditorComponent do
     - `alerts`: A list of alerts, used for validating LQL queries and completions.
     - `sources`: A list of sources, used for completions.
     - `id`: A unique identifier for the editor.
+    - `language`: Query language, defaults to `:bq_sql`. PromQL uses plain-text editing.
     - `on_query_change`: Optional function to be called when the query changes.
 
   ## Example
@@ -24,13 +23,32 @@ defmodule LogflareWeb.MonacoEditorComponent do
           />
   """
 
+  use LogflareWeb, :live_component
+
   alias Logflare.Sql
 
   def mount(socket) do
-    {:ok, assign(socket, parse_error_message: nil, on_query_change: nil, query: nil)}
+    {:ok,
+     assign(socket,
+       parse_error_message: nil,
+       on_query_change: nil,
+       query: nil,
+       language: :bq_sql
+     )}
   end
 
   def update(assigns, socket) do
+    language = Map.get(assigns, :language, :bq_sql)
+
+    socket =
+      if language != socket.assigns.language do
+        socket
+        |> assign(:parse_error_message, nil)
+        |> LiveMonacoEditor.change_language(editor_language(language), to: "query_string")
+      else
+        socket
+      end
+
     # only use field if not first mount
     assigns_query = socket.assigns.query
 
@@ -48,13 +66,13 @@ defmodule LogflareWeb.MonacoEditorComponent do
   end
 
   def render(assigns) do
-    assigns = assigns |> assign(editor_opts: editor_opts())
+    assigns = assign(assigns, editor_opts: editor_opts(assigns.language))
 
     ~H"""
     <div id={@id}>
       <.support_scripts completions={@completions} id={@field.id <> "_completions"} />
       <LiveMonacoEditor.code_editor value={@field.value} target={@myself} change="parse-query" path="query_string" phx-format={JS.hide()} id={"#{@id}_lme"} opts={@editor_opts} />
-      <div class="tw-flex tw-justify-end">
+      <div :if={@language != :promql} class="tw-flex tw-justify-end">
         <button type="button" class="btn btn-secondary tw-mr-0 tw-mt-2" phx-click={JS.dispatch("editor:format", to: "#" <> @id)}>
           Format
         </button>
@@ -62,7 +80,7 @@ defmodule LogflareWeb.MonacoEditorComponent do
 
       {hidden_input(@field.form, :query, value: @query)}
       {error_tag(@field.form, :query)}
-      <.alert :if={@parse_error_message} variant="warning">
+      <.alert :if={@language != :promql and @parse_error_message} variant="warning">
         <strong>SQL Parse error!</strong>
         <br />
         <span>{@parse_error_message}</span>
@@ -121,13 +139,17 @@ defmodule LogflareWeb.MonacoEditorComponent do
     """
   end
 
+  def handle_event("format-query", _params, %{assigns: %{language: :promql}} = socket) do
+    {:noreply, socket}
+  end
+
   def handle_event("format-query", %{"value" => value}, socket) do
     {:ok, formatted} = Sql.format(value)
     {:noreply, socket |> LiveMonacoEditor.set_value(formatted, to: "query_string")}
   end
 
   def handle_event("parse-query", %{"value" => query}, socket) do
-    %{endpoints: endpoints, alerts: alerts} = socket.assigns
+    %{endpoints: endpoints, alerts: alerts, language: language} = socket.assigns
 
     if is_function(socket.assigns.on_query_change) do
       socket.assigns.on_query_change.(query)
@@ -135,8 +157,10 @@ defmodule LogflareWeb.MonacoEditorComponent do
 
     field = socket.assigns.field |> Map.put(:value, query)
 
+    parse_result = if language == :promql, do: :ok, else: parse_query(query, endpoints, alerts)
+
     socket =
-      case parse_query(query, endpoints, alerts) do
+      case parse_result do
         :ok ->
           assign(socket, parse_error_message: nil)
 
@@ -165,7 +189,7 @@ defmodule LogflareWeb.MonacoEditorComponent do
            :bq_sql,
            query_string,
            endpoints,
-           alerts
+           Enum.reject(alerts, &(Map.get(&1, :language) == :promql))
          ) do
       {:ok, _} ->
         :ok
@@ -183,17 +207,23 @@ defmodule LogflareWeb.MonacoEditorComponent do
     %{endpoints: endpoints, alerts: alerts, sources: sources} = socket.assigns
 
     completions =
-      [sources, endpoints, alerts] |> List.flatten() |> Enum.map(fn item -> item.name end)
+      [sources, endpoints, Enum.reject(alerts, &(Map.get(&1, :language) == :promql))]
+      |> List.flatten()
+      |> Enum.map(fn item -> item.name end)
 
     assign(socket, completions: completions)
   end
 
-  defp editor_opts do
+  @spec editor_language(atom()) :: String.t()
+  defp editor_language(:promql), do: "plaintext"
+  defp editor_language(_language), do: "sql"
+
+  defp editor_opts(language) do
     Map.merge(
       LiveMonacoEditor.default_opts(),
       %{
         "wordWrap" => "on",
-        "language" => "sql",
+        "language" => editor_language(language),
         "fontSize" => 12,
         "padding" => %{
           "top" => 14,
