@@ -335,6 +335,18 @@ defmodule Logflare.Repo.ConnectionOptionsTest do
     assert opts[:socket_options] == [:inet]
     refute Keyword.has_key?(opts, :url)
     refute Keyword.has_key?(opts, :auth)
+
+    previous_repo = Repo.get_dynamic_repo()
+
+    try do
+      {key, _config} = entry
+      Repo.put_dynamic_repo(Replicas.lookup!(key))
+
+      assert %Postgrex.Result{rows: [["on"]]} =
+               Repo.query!("SHOW default_transaction_read_only", [])
+    after
+      Repo.put_dynamic_repo(previous_repo)
+    end
   end
 
   describe "prepare_replication_epgsql/2" do
