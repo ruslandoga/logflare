@@ -135,6 +135,10 @@ Route a request **either** with the `source`/`source_name` query parameter **or*
 - Every declared source is checked to be available before any events are written, so a source that is already unavailable is rejected without ingesting anything. A source can still become unavailable after writing has started, so a **503** does not guarantee that nothing was ingested: retrying the whole batch is at-least-once and may duplicate events.
 :::
 
+## OpenTelemetry Context
+
+OTLP logs, metrics, and traces can omit the resource and instrumentation scope messages. Logflare treats omitted context as empty context and accepts empty export batches.
+
 ## Pipeline Transformations
 
 At ingestion, the pipeline will perform the following in sequence:
